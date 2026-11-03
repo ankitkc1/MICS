@@ -3,10 +3,10 @@
 model:
   name: multi_encoder_unet3d
   modalities:
-    t1: 1
-    t1ce: 1
-    t2: 1
     flair: 1
+    t1ce: 1
+    t1: 1
+    t2: 1
   num_classes: 4
   base_channels: 16
   num_levels: 4
@@ -17,10 +17,10 @@ model:
 
 federated_components:
   modality_specific:
-    - encoder:t1
-    - encoder:t1ce
-    - encoder:t2
     - encoder:flair
+    - encoder:t1ce
+    - encoder:t1
+    - encoder:t2
   shared:
     - fusion
     - decoder

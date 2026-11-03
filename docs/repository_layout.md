@@ -16,12 +16,16 @@ src/mics/selection owns participation decisions. Selectors consume
 SelectionContext metadata and return a SelectionPlan. They must not train the
 model or mutate data-loader state.
 
-Future modules should follow the same rule:
+src/mics/data owns preprocessing assumptions, sample loading, named modality
+mapping, and deterministic patch extraction.
 
-- data will own preprocessing, sample loading, and deterministic partitions;
-- training will own local optimization and the round coordinator;
-- evaluation will own metric definitions and federated evaluation;
-- experiment will own resolved configuration and run metadata.
+src/mics/training owns losses and will later own local optimization. It must not
+choose participating clients.
+
+src/mics/evaluation owns metric definitions and will later own federated
+evaluation.
+
+A future experiment module will own resolved configuration and run metadata.
 
 ## Thin entry points
 

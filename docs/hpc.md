@@ -18,8 +18,16 @@ toolchain, then create the environment:
 Point the configuration to the dataset already present on the cluster:
 
     export MICS_DATA_ROOT=$HOME/FedMEPD/data/BraTS2020_npy
+    export MICS_SPLIT_ROOT=$HOME/pmcs/split/20_c8_heter_modalnum
 
 No dataset copy is required.
+
+Validate the real arrays and one existing client split before training:
+
+    python scripts/smoke_brats_data.py \
+      --client C1 \
+      --modalities flair,t1ce,t1,t2 \
+      --samples 2
 
 Record the final resolved environment before a reported study:
 

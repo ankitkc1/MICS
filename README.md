@@ -21,6 +21,9 @@ Implemented and tested:
 - modality dropout for robustness experiments;
 - stable federated component boundaries;
 - modality-specific component-wise aggregation;
+- a BraTS2020 NumPy loader for the existing HPC arrays and client splits;
+- deterministic foreground-aware 3D patch sampling;
+- Dice--cross-entropy loss and WT, TC, and ET metrics;
 - a selector interface with a reproducible uniform-random baseline;
 - CPU tests and an HPC GPU smoke-job template.
 
@@ -28,7 +31,6 @@ Planned but not yet claimed as experimental evidence:
 
 - the final MICS objective and greedy selector;
 - PoC, DivFL, Oort, and modality-aware comparison methods;
-- dataset loaders and deterministic client partitioning;
 - the synchronous federated training and evaluation runner;
 - checkpoint/resume and complete journal experiments.
 
@@ -60,9 +62,12 @@ statistics complicate federated aggregation.
     +-- hpc/slurm/           scheduler scripts
     +-- scripts/             validation and experiment entry points
     +-- src/mics/
+    |   +-- data/            dataset and client-split adapters
+    |   +-- evaluation/      task metrics
     |   +-- federated/       component aggregation
     |   +-- models/          multimodal 3D U-Net
     |   +-- selection/       selector contracts and methods
+    |   +-- training/        losses and local-training utilities
     +-- tests/               deterministic unit tests
 
 See docs/repository_layout.md for the ownership rules that prevent experimental
@@ -89,10 +94,10 @@ For development directly from the checkout:
 
     model = MultiEncoderUNet3D(
         modalities=OrderedDict([
-            ("t1", 1),
-            ("t1ce", 1),
-            ("t2", 1),
             ("flair", 1),
+            ("t1ce", 1),
+            ("t1", 1),
+            ("t2", 1),
         ]),
         num_classes=4,
         base_channels=16,

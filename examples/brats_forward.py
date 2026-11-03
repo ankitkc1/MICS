@@ -15,10 +15,10 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MultiEncoderUNet3D(
         modalities=OrderedDict(
-            t1=1,
-            t1ce=1,
-            t2=1,
             flair=1,
+            t1ce=1,
+            t1=1,
+            t2=1,
         ),
         num_classes=4,
         base_channels=8,
