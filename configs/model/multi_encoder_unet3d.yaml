@@ -1,5 +1,7 @@
-# Reference experiment settings. The model itself does not require a YAML parser.
+# General architecture configuration. Dataset-specific modality names may be
+# overridden by an experiment configuration.
 model:
+  name: multi_encoder_unet3d
   modalities:
     t1: 1
     t1ce: 1
@@ -12,13 +14,6 @@ model:
   norm: group
   dropout: 0.0
   modality_dropout: 0.2
-
-training:
-  patch_size: [96, 96, 96]
-  loss: dice_cross_entropy
-  optimizer: adamw
-  learning_rate: 0.0001
-  weight_decay: 0.00001
 
 federated_components:
   modality_specific:

@@ -1,0 +1,11 @@
+name: mics-cpu
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch>=2.0
+  - cpuonly
+  - pip
+  - pip:
+      - -e .

@@ -1,0 +1,14 @@
+# Adjust the CUDA runtime to the driver and modules available on the target
+# cluster, then archive the resolved environment with each reported study.
+name: mics
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch>=2.0
+  - pytorch-cuda=12.1
+  - pip
+  - pip:
+      - -e .

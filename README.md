@@ -1,51 +1,89 @@
-# MICS modular multimodal 3D U-Net
+# MICS: multimodal federated client selection
 
-This project provides a general segmentation backbone for experiments with
-heterogeneous modality availability in federated learning. It is not tied to
-BraTS: modality names, input-channel counts, the number of classes, network
-depth, and fusion rule are all configurable.
+MICS is a research codebase for studying client selection under heterogeneous
+modality availability. The repository is organised for journal reproducibility,
+local development, and synchronous cross-silo experiments on a Slurm-managed
+HPC cluster.
 
-The implementation deliberately separates two concerns:
+The central experimental question is separated from the segmentation
+architecture: a selector decides which clients participate, while the
+multimodal model learns only from the modalities available at each selected
+client. This allows MICS and competing selectors to be compared using the same
+training, aggregation, data partitions, and evaluation protocol.
 
-1. the neural architecture learns from the modalities available at a client;
-2. a client-selection policy such as MICS decides which clients participate.
+## Current implementation status
 
-This makes it possible to compare client-selection rules while keeping the
-training architecture fixed.
+Implemented and tested:
 
-## Architecture
+- a configurable multi-encoder residual 3D U-Net;
+- masked multi-scale mean, mean--variance, and attention fusion;
+- missing-modality support at client and sample levels;
+- modality dropout for robustness experiments;
+- stable federated component boundaries;
+- modality-specific component-wise aggregation;
+- a selector interface with a reproducible uniform-random baseline;
+- CPU tests and an HPC GPU smoke-job template.
 
-Each modality has an independent residual 3D encoder. Corresponding feature
-scales are fused with an availability mask, after which a shared 3D U-Net
-decoder produces voxel-level logits.
+Planned but not yet claimed as experimental evidence:
 
-    image modality a -> encoder:a --\
-    image modality b -> encoder:b ----> masked multi-scale fusion
-    image modality c -> encoder:c --/             |
-                                                    v
-                              shared decoder -> prediction head -> logits
+- the final MICS objective and greedy selector;
+- PoC, DivFL, Oort, and modality-aware comparison methods;
+- dataset loaders and deterministic client partitioning;
+- the synchronous federated training and evaluation runner;
+- checkpoint/resume and complete journal experiments.
+
+## Model architecture
+
+Each modality is processed by an independent 3D encoder. Features at matching
+resolutions are fused using only the modalities marked as available. A shared
+3D U-Net decoder and prediction head produce voxel-level logits.
+
+    modality a -> encoder:a --\
+    modality b -> encoder:b ----> masked multi-scale fusion
+    modality c -> encoder:c --/             |
+                                                 v
+                           shared decoder -> segmentation head -> logits
 
 The default mean--variance fusion is permutation invariant over the available
-modality representations. It computes masked first- and second-order feature
-statistics at every scale and learns a 1x1x1 projection. Parameter-free masked
-mean and learned spatial attention are also available for ablation studies.
+encoded representations. Group normalization is used by default because 3D
+segmentation commonly requires small local batches and client-specific batch
+statistics complicate federated aggregation.
 
-Group normalization is the default because 3D segmentation commonly uses small
-local batch sizes and because it avoids aggregating client-specific batch
-statistics.
+## Repository layout
 
-## Installation
+    MICS/
+    +-- configs/             reviewed experiment configuration
+    +-- docs/                HPC and reproducibility documentation
+    +-- environments/        local and cluster environments
+    +-- examples/            minimal executable examples
+    +-- experiments/         manifests and study definitions
+    +-- hpc/slurm/           scheduler scripts
+    +-- scripts/             validation and experiment entry points
+    +-- src/mics/
+    |   +-- federated/       component aggregation
+    |   +-- models/          multimodal 3D U-Net
+    |   +-- selection/       selector contracts and methods
+    +-- tests/               deterministic unit tests
 
-From this directory:
+See docs/repository_layout.md for the ownership rules that prevent experimental
+logic from becoming entangled with model code.
+
+## Installation and local validation
+
+Create an isolated Python environment, then run:
 
     python -m pip install -e .
+    python scripts/validate_install.py
 
-Only PyTorch is required. Python 3.10 or later is supported.
+For development directly from the checkout:
 
-## Basic use
+    $env:PYTHONPATH = "src"
+    python -m unittest discover -s tests -v
+    python examples/brats_forward.py
+
+## BraTS-style model example
 
     from collections import OrderedDict
-
     import torch
     from mics import MultiEncoderUNet3D
 
@@ -63,99 +101,52 @@ Only PyTorch is required. Python 3.10 or later is supported.
         modality_dropout=0.2,
     )
 
-    inputs = {
-        "t1": torch.randn(2, 1, 96, 96, 96),
-        "flair": torch.randn(2, 1, 96, 96, 96),
-    }
-    logits = model(inputs)
+    logits = model({
+        "t1": torch.randn(1, 1, 96, 96, 96),
+        "flair": torch.randn(1, 1, 96, 96, 96),
+    })
 
-An input is a mapping from modality name to a tensor with shape
-[batch, channels, depth, height, width]. Omitted keys are treated as missing.
-The result contains unnormalised logits with shape
-[batch, classes, depth, height, width].
+The same model supports any named modality set and is therefore not restricted
+to BraTS. Inputs use the shape batch, channels, depth, height, width.
 
-For a mixed batch, pass a Boolean availability mask of shape
-[batch, number_of_modalities]. Its columns follow model.modality_names.
-Every sample must retain at least one modality.
+## Federated component contract
 
-    availability = torch.tensor([
-        [True, False, False, False],
-        [False, False, False, True],
-    ])
-    logits = model(inputs, availability)
-
-## Federated component boundary
-
-The model exposes stable component identifiers:
+The model exposes:
 
 - encoder:modality for each modality-specific encoder;
-- fusion for all scale-wise fusion modules;
+- fusion for scale-wise fusion modules;
 - decoder for the shared decoder;
-- head for the voxel classifier.
+- head for the prediction layer.
 
-Before local training, freeze encoders that a client cannot update:
+An unavailable encoder is frozen locally and omitted from that client's upload.
+Server aggregation averages each component over only the successful clients that
+updated it. A component receiving no update retains its previous global state.
 
-    model.configure_client_modalities({"t1", "flair"})
-    optimizer = torch.optim.AdamW(
-        (parameter for parameter in model.parameters()
-         if parameter.requires_grad),
-        lr=1e-4,
-    )
+## Intended simulation model
 
-The client can upload only the components that it actually trained:
+The planned main experiments use a custom, centralised, synchronous cross-silo
+simulation in PyTorch. Logical clients maintain separate data partitions,
+modality masks, optimizer states, and local metadata on a Slurm-allocated node.
+Communication is represented by parameter exchange; raw patient data are never
+placed in server aggregation objects.
 
-    states = model.component_state_dict()
-    upload = {
-        name: states[name]
-        for name in model.trainable_component_names()
-    }
+Selector-only dry runs must be labelled offline simulations. They do not load
+MRI data, train a neural network, or constitute FL accuracy experiments.
 
-At the server, component-wise averaging prevents a missing modality from being
-interpreted as a zero update:
+## Reproducibility policy
 
-    from mics import ComponentUpdate, aggregate_components
+Source code, reviewed configurations, client manifests, scheduler scripts, and
+small aggregate result tables belong in version control. Patient data, model
+checkpoints, raw logs, scheduler output, credentials, and large generated
+artifacts do not.
 
-    new_global_state = aggregate_components(
-        global_state=model.component_state_dict(),
-        updates=[
-            ComponentUpdate(
-                client_id="hospital-01",
-                states=upload,
-                weight=number_of_training_cases,
-            )
-        ],
-    )
-    model.load_component_state_dict(new_global_state)
+Every reported experiment must record its source revision, full configuration,
+environment, seeds, client partition, modality mask, selected clients per
+round, checkpoint lineage, and metric definition. The required fields are
+listed in docs/reproducibility.md.
 
-An update may use a mapping of component-specific weights when the number of
-effective examples differs across modality encoders. Components receiving no
-valid update retain their previous global state.
+## Public release checklist
 
-## Training notes
-
-- Use the returned logits directly with cross-entropy or a Dice--cross-entropy
-  loss; do not apply softmax before a loss that expects logits.
-- modality_dropout randomly removes available modalities during training while
-  guaranteeing that at least one remains. It should be reported as a training
-  hyperparameter and ablated independently of client selection.
-- All inputs at a client must be spatially registered before feature fusion.
-- Patch dimensions should normally be divisible by 2 ** (num_levels - 1).
-  Odd dimensions are supported by decoder interpolation, but predictable patch
-  dimensions make experiments easier to reproduce.
-- The attention fusion option is more expressive but can encode modality
-  identity through learned biases. Treat it as an architectural ablation rather
-  than as the MICS modality-importance score.
-
-The reference BraTS-style settings are in configs/brats_unet3d.yaml. They are
-documentation rather than a hard dependency on a configuration framework.
-
-## Validation
-
-Run the dependency-free test suite from this directory:
-
-    $env:PYTHONPATH = "src"
-    python -m unittest discover -s tests -v
-
-The tests cover output shape, arbitrary modality sets, per-sample availability,
-modality dropout, unavailable-encoder freezing, component state transfer, and
-component-wise aggregation.
+Before public journal release, add the final author list, institutional
+acknowledgements, dataset access statement, software licence, archival DOI, and
+the exact commands that reproduce every manuscript table and figure.

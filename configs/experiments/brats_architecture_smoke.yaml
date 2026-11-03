@@ -1,0 +1,9 @@
+experiment:
+  name: brats_architecture_smoke
+  purpose: architecture_validation_only
+  model_config: configs/model/multi_encoder_unet3d.yaml
+  data_config: configs/data/brats2020.yaml
+  federation_config: configs/federation/cross_silo.yaml
+  selection_config: configs/selection/uniform.yaml
+  seed: 42
+  produces_manuscript_result: false

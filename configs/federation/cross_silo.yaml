@@ -1,0 +1,22 @@
+federation:
+  mode: synchronous_cross_silo_simulation
+  num_clients: 8
+  rounds: 150
+  clients_per_round: 2
+  local_epochs: 1
+  aggregation: component_weighted_mean
+  server_has_training_data: false
+
+training:
+  batch_size: 1
+  optimizer: adamw
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  gradient_clip_norm: 5.0
+
+evaluation:
+  every_rounds: 10
+  report_macro_client_metrics: true
+  report_sample_weighted_metrics: true
+  report_per_client_metrics: true
+  report_per_class_metrics: true

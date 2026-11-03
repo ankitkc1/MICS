@@ -1,0 +1,15 @@
+# Schema placeholder for the future MICS implementation. Values must be pinned
+# only after the manuscript objective and estimator definitions are final.
+selection:
+  name: mics
+  implementation_status: not_implemented
+  seed: 42
+  independent_rng_stream: true
+  budget_type: clients_per_round
+  budget: 2
+  modality_importance:
+    estimator: to_be_defined
+  redundancy:
+    kernel: to_be_defined
+  participation_history:
+    enabled: true
