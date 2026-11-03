@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mics-models"
+version = "0.1.0"
+description = "Modular multimodal 3D U-Net components for MICS experiments"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
