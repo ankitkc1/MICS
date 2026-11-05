@@ -24,6 +24,7 @@ Implemented and tested:
 - a BraTS2020 NumPy loader for the existing HPC arrays and client splits;
 - deterministic foreground-aware 3D patch sampling;
 - Dice--cross-entropy loss and WT, TC, and ET metrics;
+- a real-data CUDA forward/backward smoke test with peak-memory reporting;
 - a selector interface with a reproducible uniform-random baseline;
 - CPU tests and an HPC GPU smoke-job template.
 

@@ -17,7 +17,7 @@ toolchain, then create the environment:
 
 Point the configuration to the dataset already present on the cluster:
 
-    export MICS_DATA_ROOT=$HOME/FedMEPD/data/BraTS2020_npy
+    export MICS_DATA_ROOT=$HOME/BraTS2020_npy
     export MICS_SPLIT_ROOT=$HOME/pmcs/split/20_c8_heter_modalnum
 
 No dataset copy is required.
@@ -48,6 +48,24 @@ hpc/slurm/model_smoke.slurm. Then:
 
 The output must end with MICS HPC SMOKE TEST PASSED before a training job is
 created.
+
+After the synthetic model check, run one forward/backward optimizer step on a
+real foreground-containing BraTS patch:
+
+    bash -n hpc/slurm/brats_gpu_smoke.slurm
+    sbatch hpc/slurm/brats_gpu_smoke.slurm
+
+The first run intentionally uses four base channels so architecture, loss,
+gradient, and memory failures can be diagnosed safely. If it passes with
+adequate memory headroom, repeat with eight and then sixteen base channels:
+
+    MICS_BASE_CHANNELS=8 sbatch hpc/slurm/brats_gpu_smoke.slurm
+    MICS_BASE_CHANNELS=16 sbatch hpc/slurm/brats_gpu_smoke.slurm
+
+The Dice values printed by this job come from one patch and a randomly
+initialized model. They are diagnostic only and must not be reported as
+validation or test performance. Reported BraTS accuracy must be computed on
+held-out whole cases after sliding-window reconstruction.
 
 ## Training and array studies
 
