@@ -86,6 +86,20 @@ Both clients must start each round from the same pre-round global model. The
 T1ce encoder and shared components receive two updates; the other modality
 encoders receive one update. Every global component must change in both rounds.
 
+Install the SciPy metric dependency once after pulling the whole-volume
+evaluation update:
+
+    conda install -n mics -c conda-forge "scipy>=1.10" -y
+
+Then validate complete-case reconstruction:
+
+    bash -n hpc/slurm/whole_volume_eval_smoke.slurm
+    sbatch hpc/slurm/whole_volume_eval_smoke.slurm
+
+This diagnostic uses one C1 training case only to validate shape restoration,
+window coverage, blending, Dice, and HD95. Journal results must instead use the
+fixed held-out validation and test case lists.
+
 ## Training and array studies
 
 The future training entry point should accept a complete experiment

@@ -53,6 +53,12 @@ These are mechanism diagnostics specific to the proposed contribution. They
 must not be presented as substitutes for the primary accuracy, convergence,
 fairness, time, and communication metrics above.
 
+BraTS 2020 cases use one-millimetre isotropic spacing. For a region absent in
+both prediction and reference, Dice is one and HD95 is zero. If exactly one is
+empty, Dice is zero and HD95 receives the BraTS 2020 penalty of 373.13 mm.
+Metrics are computed per whole subject after Gaussian sliding-window
+reconstruction, never by averaging training-patch scores.
+
 ## Comparison rules
 
 All methods use identical model initialization, client splits, modality

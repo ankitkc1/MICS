@@ -27,6 +27,7 @@ Implemented and tested:
 - a real-data CUDA forward/backward smoke test with peak-memory reporting;
 - reusable AMP-aware local-client optimization and component update export;
 - sequential synchronous federated rounds with component-wise aggregation;
+- whole-volume Gaussian sliding-window inference and BraTS Dice/HD95 metrics;
 - a selector interface with a reproducible uniform-random baseline;
 - CPU tests and an HPC GPU smoke-job template.
 

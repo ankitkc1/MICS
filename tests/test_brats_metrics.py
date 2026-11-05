@@ -6,7 +6,12 @@ import unittest
 
 import torch
 
-from mics.evaluation import brats_dice_from_logits, brats_region_dice
+from mics.evaluation import (
+    BRATS_HD95_PENALTY_MM,
+    brats_dice_from_logits,
+    brats_region_dice,
+    brats_region_hd95,
+)
 from mics.training import DiceCrossEntropyLoss, soft_dice_loss
 
 
@@ -57,6 +62,38 @@ class BraTSMetricTests(unittest.TestCase):
         target = torch.full((1, 2, 2, 2), 4)
         with self.assertRaisesRegex(ValueError, "outside"):
             soft_dice_loss(logits, target)
+
+    def test_hd95_is_zero_for_identical_regions(self) -> None:
+        target = torch.zeros(1, 5, 5, 5, dtype=torch.long)
+        target[:, 1:4, 1:4, 1:4] = 3
+        scores = brats_region_hd95(target, target)
+        for score in scores.values():
+            self.assertEqual(float(score), 0.0)
+
+    def test_hd95_uses_brats_penalty_when_one_region_is_empty(self) -> None:
+        prediction = torch.zeros(1, 5, 5, 5, dtype=torch.long)
+        target = torch.zeros_like(prediction)
+        prediction[:, 2, 2, 2] = 3
+
+        scores = brats_region_hd95(prediction, target)
+
+        for score in scores.values():
+            self.assertAlmostEqual(float(score), BRATS_HD95_PENALTY_MM, places=2)
+
+    def test_hd95_respects_physical_spacing(self) -> None:
+        prediction = torch.zeros(1, 5, 5, 5, dtype=torch.long)
+        target = torch.zeros_like(prediction)
+        prediction[:, 1, 2, 2] = 3
+        target[:, 2, 2, 2] = 3
+
+        scores = brats_region_hd95(
+            prediction,
+            target,
+            spacing=(2.0, 1.0, 1.0),
+        )
+
+        for score in scores.values():
+            self.assertAlmostEqual(float(score), 2.0)
 
 
 if __name__ == "__main__":
