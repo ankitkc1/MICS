@@ -4,8 +4,10 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10
+  - numpy>=1.23
   - pytorch>=2.0
   - cpuonly
   - pip
-  - pip:
-      - -e .
+
+# After creating and activating the environment, install this repository from
+# its root with: python -m pip install -e . --no-deps
