@@ -25,6 +25,7 @@ Implemented and tested:
 - deterministic foreground-aware 3D patch sampling;
 - Dice--cross-entropy loss and WT, TC, and ET metrics;
 - a real-data CUDA forward/backward smoke test with peak-memory reporting;
+- reusable AMP-aware local-client optimization and component update export;
 - a selector interface with a reproducible uniform-random baseline;
 - CPU tests and an HPC GPU smoke-job template.
 

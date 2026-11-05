@@ -13,6 +13,9 @@ training:
   learning_rate: 0.0001
   weight_decay: 0.00001
   gradient_clip_norm: 5.0
+  mixed_precision: true
+  amp_initial_scale: 4096.0
+  amp_max_retries: 8
 
 evaluation:
   every_rounds: 10

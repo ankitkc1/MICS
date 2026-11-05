@@ -67,6 +67,16 @@ initialized model. They are diagnostic only and must not be reported as
 validation or test performance. Reported BraTS accuracy must be computed on
 held-out whole cases after sliding-window reconstruction.
 
+Once the reference channel width passes, validate reusable local optimization
+for both complete and single-modality clients:
+
+    bash -n hpc/slurm/local_training_smoke.slurm
+    sbatch hpc/slurm/local_training_smoke.slurm
+
+This job trains C1 and C6 for two patches each. It must show that C1 exports all
+four encoders while C6 exports only encoder:t1ce plus the shared fusion,
+decoder, and head components.
+
 ## Training and array studies
 
 The future training entry point should accept a complete experiment
