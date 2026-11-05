@@ -77,6 +77,15 @@ This job trains C1 and C6 for two patches each. It must show that C1 exports all
 four encoders while C6 exports only encoder:t1ce plus the shared fusion,
 decoder, and head components.
 
+After local training passes, validate two complete communication rounds:
+
+    bash -n hpc/slurm/federated_rounds_smoke.slurm
+    sbatch hpc/slurm/federated_rounds_smoke.slurm
+
+Both clients must start each round from the same pre-round global model. The
+T1ce encoder and shared components receive two updates; the other modality
+encoders receive one update. Every global component must change in both rounds.
+
 ## Training and array studies
 
 The future training entry point should accept a complete experiment

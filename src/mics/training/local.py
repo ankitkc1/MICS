@@ -11,7 +11,7 @@ import torch
 from torch import nn
 
 from ..evaluation import BRATS_REGIONS, brats_dice_from_logits
-from ..federated import ComponentUpdate
+from ..federated.aggregation import ComponentUpdate
 from ..models import MultiEncoderUNet3D
 from .losses import DiceCrossEntropyLoss
 

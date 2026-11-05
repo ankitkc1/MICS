@@ -67,6 +67,9 @@ run without an explicit, recorded action.
 
 ## Evaluation contract
 
+The complete metric hierarchy and comparison rules are defined in
+docs/evaluation_metrics.md.
+
 For every evaluation point, report:
 
 - macro-average client metric;
