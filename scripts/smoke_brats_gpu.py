@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import time
 from collections import OrderedDict
@@ -87,11 +86,38 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use CUDA automatic mixed precision.",
     )
+    parser.add_argument(
+        "--amp-initial-scale",
+        type=float,
+        default=4096.0,
+        help="Initial CUDA AMP loss scale.",
+    )
+    parser.add_argument(
+        "--amp-max-retries",
+        type=int,
+        default=8,
+        help="Maximum retries after AMP gradient overflow.",
+    )
     return parser
 
 
 def gibibytes(value: int) -> float:
     return value / (1024**3)
+
+
+def gradient_l2_norm(
+    parameters: list[torch.nn.Parameter],
+) -> torch.Tensor:
+    """Return the global gradient norm without modifying gradients."""
+
+    norms = [
+        parameter.grad.detach().norm(2)
+        for parameter in parameters
+        if parameter.grad is not None
+    ]
+    if not norms:
+        raise RuntimeError("No gradients were produced for trainable parameters.")
+    return torch.stack(norms).norm(2)
 
 
 def main() -> None:
@@ -112,6 +138,10 @@ def main() -> None:
         raise SystemExit("--num-levels must be at least two.")
     if arguments.learning_rate <= 0:
         raise SystemExit("--learning-rate must be positive.")
+    if arguments.amp_initial_scale <= 0:
+        raise SystemExit("--amp-initial-scale must be positive.")
+    if arguments.amp_max_retries < 0:
+        raise SystemExit("--amp-max-retries cannot be negative.")
 
     divisor = 2 ** (arguments.num_levels - 1)
     if any(size % divisor for size in arguments.patch_size):
@@ -170,36 +200,70 @@ def main() -> None:
         lr=arguments.learning_rate,
     )
     use_amp = bool(arguments.amp)
-    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        enabled=use_amp,
+        init_scale=arguments.amp_initial_scale,
+    )
+    initial_amp_scale = float(scaler.get_scale())
 
     torch.cuda.reset_peak_memory_stats(device)
     torch.cuda.synchronize(device)
     started = time.perf_counter()
 
-    optimizer.zero_grad(set_to_none=True)
-    with torch.autocast(
-        device_type="cuda",
-        dtype=torch.float16,
-        enabled=use_amp,
-    ):
-        logits = model(inputs, availability)
-        loss = criterion(logits, target)
+    maximum_attempts = 1 + (arguments.amp_max_retries if use_amp else 0)
+    overflow_retries = 0
+    successful_attempt = 0
+    scale_before_success = float(scaler.get_scale())
+    for attempt in range(1, maximum_attempts + 1):
+        optimizer.zero_grad(set_to_none=True)
+        with torch.autocast(
+            device_type="cuda",
+            dtype=torch.float16,
+            enabled=use_amp,
+        ):
+            logits = model(inputs, availability)
+            loss = criterion(logits, target)
 
-    if not bool(torch.isfinite(loss)):
-        raise RuntimeError(f"Non-finite loss encountered: {float(loss.detach())}")
+        if not bool(torch.isfinite(loss)):
+            raise RuntimeError(
+                f"Non-finite forward loss encountered: {float(loss.detach())}"
+            )
 
-    scaler.scale(loss).backward()
-    scaler.unscale_(optimizer)
-    gradient_norm = torch.nn.utils.clip_grad_norm_(
-        trainable_parameters,
-        max_norm=math.inf,
-    )
-    if not bool(torch.isfinite(gradient_norm)):
-        raise RuntimeError(
-            f"Non-finite gradient norm encountered: {float(gradient_norm)}"
+        scale_before_attempt = float(scaler.get_scale())
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        gradient_norm = gradient_l2_norm(trainable_parameters)
+        gradients_are_finite = bool(torch.isfinite(gradient_norm))
+
+        if gradients_are_finite:
+            scaler.step(optimizer)
+            scaler.update()
+            successful_attempt = attempt
+            scale_before_success = scale_before_attempt
+            break
+
+        if not use_amp:
+            raise RuntimeError(
+                f"Non-finite gradient norm encountered: {float(gradient_norm)}"
+            )
+
+        # GradScaler skips the optimizer update because unscale_ recorded
+        # non-finite gradients, then lowers the scale for the retry.
+        scaler.step(optimizer)
+        scaler.update()
+        overflow_retries += 1
+        print(
+            "AMP gradient overflow: "
+            f"attempt={attempt}, scale={scale_before_attempt:g}, "
+            f"next_scale={float(scaler.get_scale()):g}"
         )
-    scaler.step(optimizer)
-    scaler.update()
+        if attempt == maximum_attempts:
+            raise RuntimeError(
+                "AMP gradients remained non-finite after "
+                f"{maximum_attempts} attempts; "
+                f"final scale={float(scaler.get_scale()):g}."
+            )
 
     torch.cuda.synchronize(device)
     elapsed_seconds = time.perf_counter() - started
@@ -229,6 +293,11 @@ def main() -> None:
         "num_levels": arguments.num_levels,
         "fusion": arguments.fusion,
         "amp": use_amp,
+        "amp_initial_scale": initial_amp_scale,
+        "amp_scale_before_success": scale_before_success,
+        "amp_final_scale": float(scaler.get_scale()),
+        "amp_overflow_retries": overflow_retries,
+        "optimizer_attempts": successful_attempt,
         "total_parameters": total_parameters,
         "trainable_parameters": trainable_parameter_count,
         "trainable_components": list(model.trainable_component_names()),
