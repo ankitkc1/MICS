@@ -32,6 +32,20 @@ dataset:
     foreground_probability: 0.5
 
 clients:
-  manifest: experiments/manifests/brats2020_clients.csv
+  # A materialized scenario is authoritative for both case partitions and
+  # modality masks. SplitA and SplitB deliberately share case assignments but
+  # reverse FLAIR/T1ce availability to isolate modality heterogeneity.
+  scenario_bundle_root_env: MICS_SPLIT_BUNDLE_ROOT
+  scenario_config_filename: materialized_config.json
+  scenarios:
+    A:
+      directory: splitA
+      expected_modality_pool_sizes: {flair: 7, t1ce: 2, t1: 5, t2: 4}
+    B:
+      directory: splitB
+      expected_modality_pool_sizes: {flair: 2, t1ce: 7, t1: 5, t2: 4}
+  global_test_filename: global_test.csv
+
+legacy_integration_smoke_tests:
   split_root_env: MICS_SPLIT_ROOT
   split_file_pattern: "c{client_number}.csv"

@@ -22,6 +22,21 @@ Point the configuration to the dataset already present on the cluster:
 
 No dataset copy is required.
 
+`MICS_SPLIT_ROOT` above is retained only for the completed legacy integration
+smoke tests. Publication experiments use the validated scenario bundle:
+
+    export MICS_SPLIT_BUNDLE_ROOT=$HOME/pmcs/split/generated/data_seed_20260905
+    python scripts/validate_brats_scenarios.py \
+      --dataset-root "$MICS_DATA_ROOT" \
+      --scenario-config "$MICS_SPLIT_BUNDLE_ROOT/splitA/materialized_config.json" \
+      --scenario-config "$MICS_SPLIT_BUNDLE_ROOT/splitB/materialized_config.json"
+
+The command must report 368 covered cases, 222 training cases, 48 validation
+cases, 48 local-test cases, 50 global-test cases, identical case assignments
+between scenarios, and changed modality masks. The expected modality-pool sizes
+are FLAIR/T1ce/T1/T2 = 7/2/5/4 for A and 2/7/5/4 for B. It must finish with
+`MICS BRATS SCENARIO VALIDATION PASSED`.
+
 Validate the real arrays and one existing client split before training:
 
     python scripts/smoke_brats_data.py \

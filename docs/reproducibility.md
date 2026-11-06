@@ -37,16 +37,19 @@ Policies consume different numbers of selection draws. Sharing that generator
 with data shuffling silently changes local minibatch order and invalidates a
 controlled policy comparison.
 
-## Client manifest
+## Client scenario
 
-The client manifest is a small table containing client IDs and modality
-availability. It does not copy or relocate the dataset already stored on the
-HPC. If the cluster dataset already contains fixed client splits, the loader
-can resolve them by client ID or by an optional split-file column.
+The materialized client scenario binds client IDs, modality availability,
+train/validation/local-test files, and the global-test file. It does not copy or
+relocate the dataset stored on the HPC. Absolute paths recorded by the split
+generator are resolved portably against the scenario bundle.
 
-All compared selection methods must use the same client mapping and data split.
-If a second heterogeneous modality setting is evaluated, store it as a second
-manifest rather than editing the first one during an experiment.
+All compared selection methods must use the same client mapping and case split.
+The current Scenario A and Scenario B are matched modality-availability
+conditions: their case assignments are identical and their modality masks
+differ. They must not be described as independent data partitions or averaged
+as independent repetitions. Independent model/selection seeds remain necessary
+for uncertainty estimates.
 
 ## Checkpoint contract
 

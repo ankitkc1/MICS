@@ -20,6 +20,9 @@ MICS method under identical resource budgets. Additional baselines should be
 implemented through the same ClientSelector interface and must disclose any
 extra probing or communication.
 
-The current BraTS manifest records the eight logical clients and their modality
-availability. The future data loader will connect those clients to the dataset
-already present on the HPC.
+The BraTS publication scenarios are loaded from their generated
+`materialized_config.json` files. Scenario A and Scenario B hold all case
+assignments fixed and change the modality masks, permitting a matched test of
+modality heterogeneity. The loader rejects duplicate assignments, leakage,
+incorrect modality-pool metadata, and incomplete dataset coverage before
+training begins.
