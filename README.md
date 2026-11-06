@@ -29,14 +29,17 @@ Implemented and tested:
 - sequential synchronous federated rounds with component-wise aggregation;
 - whole-volume Gaussian sliding-window inference and BraTS Dice/HD95 metrics;
 - a selector interface with a reproducible uniform-random baseline;
+- validation-only paired leave-one-modality-out importance estimation;
+- exact small-silo component-service target calibration;
+- checkpointable MICS-Core/Impact component queues and cardinality greedy;
 - CPU tests and an HPC GPU smoke-job template.
 
 Planned but not yet claimed as experimental evidence:
 
-- the final MICS objective and greedy selector;
+- cached-update MICS-Diversity and knapsack-oracle extensions;
 - PoC, DivFL, Oort, and modality-aware comparison methods;
-- the synchronous federated training and evaluation runner;
-- checkpoint/resume and complete journal experiments.
+- integration of MICS selection into the tracked training runner;
+- complete multi-seed journal experiments.
 
 ## Model architecture
 

@@ -267,6 +267,52 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                 6,
             )
 
+            selector_output = root / "mics_selector_smoke.json"
+            selector_smoke = subprocess.run(
+                (
+                    sys.executable,
+                    str(project_root / "scripts" / "smoke_mics_selector.py"),
+                    "--dataset-root",
+                    str(dataset_root),
+                    "--scenario-config",
+                    str(scenario_config),
+                    "--importance-output",
+                    str(importance_path),
+                    "--output",
+                    str(selector_output),
+                    "--rounds",
+                    "3",
+                    "--clients-per-round",
+                    "2",
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if selector_smoke.returncode != 0:
+                self.fail(
+                    "MICS selector smoke subprocess failed:\n"
+                    f"stdout:\n{selector_smoke.stdout}\n"
+                    f"stderr:\n{selector_smoke.stderr}"
+                )
+            selector_payload = json.loads(
+                selector_output.read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "MICS BALANCED-SCENARIO SELECTOR SMOKE TEST PASSED",
+                selector_smoke.stdout,
+            )
+            self.assertEqual(
+                selector_payload["purpose"],
+                "selector_integration_smoke_not_model_quality",
+            )
+            self.assertFalse(
+                selector_payload["test_partition_used_for_selection"]
+            )
+            self.assertEqual(len(selector_payload["rounds"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

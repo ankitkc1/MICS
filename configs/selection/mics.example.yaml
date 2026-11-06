@@ -1,12 +1,28 @@
-# Schema placeholder for the future MICS implementation. Values must be pinned
-# only after the manuscript objective and estimator definitions are final.
+# Reference schema for the implemented cardinality-constrained MICS-Core and
+# MICS-Impact selector. Study files must replace null protocol choices.
 selection:
   name: mics
-  implementation_status: not_implemented
+  implementation_status: core_and_impact_cardinality_greedy
   seed: 42
   independent_rng_stream: true
   budget_type: clients_per_round
   budget: 2
+  component_service:
+    function: pure_coverage
+    saturation_levels:
+      flair: 1
+      t1ce: 1
+      t1: 1
+      t2: 1
+    target_calibration: static_exact_service_mixture_lp
+    priority_direction: equal
+    oracle_factor: 0.6321205588285577
+    safety_margin: 0.1
+  completion_model:
+    reliability_aware: false
+    beta_prior_success: 1.0
+    beta_prior_failure: 1.0
+  impact_weight: 1.0
   modality_importance:
     estimator: paired_leave_one_modality_out_validation_dice
     partition_role: selection_probe
@@ -19,7 +35,9 @@ selection:
     selection_transform: positive_clip_then_epsilon_floor
     epsilon: 1.0e-6
     refresh_interval_rounds: null  # Preregister after measuring probe cost.
-  redundancy:
-    kernel: to_be_defined
-  participation_history:
-    enabled: true
+  cached_representativeness:
+    enabled: false
+    implementation_status: planned_mics_diversity_extension
+  client_participation_queues:
+    enabled: false
+    targets: {}
