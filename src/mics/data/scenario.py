@@ -264,11 +264,18 @@ def load_brats_scenario(
         )
 
     raw_clients = payload.get("clients")
-    raw_masks = payload.get("modality_masks")
+    raw_masks = payload.get("masks")
+    compatibility_masks = payload.get("modality_masks")
+    if raw_masks is None:
+        raw_masks = compatibility_masks
+    elif compatibility_masks is not None and compatibility_masks != raw_masks:
+        raise ValueError(
+            "Scenario masks and compatibility modality_masks fields disagree."
+        )
     if not isinstance(raw_clients, dict) or not raw_clients:
         raise ValueError("Scenario clients must be a non-empty object.")
     if not isinstance(raw_masks, dict):
-        raise ValueError("Scenario modality_masks must be an object.")
+        raise ValueError("Scenario masks must be an object.")
 
     normalised_masks: dict[str, Any] = {}
     for raw_client_id, raw_mask in raw_masks.items():

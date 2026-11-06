@@ -80,7 +80,7 @@ class BraTSScenarioTests(unittest.TestCase):
             "split_id": scenario_id,
             "data_seed": 17,
             "modality_order": ["FLAIR", "T1ce", "T1", "T2"],
-            "modality_masks": masks,
+            "masks": masks,
             "expected_modality_pool_sizes": pool_sizes,
             "global_test_file": "/stale/host/path/global_test.csv",
             "clients": clients,
@@ -146,6 +146,18 @@ class BraTSScenarioTests(unittest.TestCase):
         self.scenario_a.write_text(json.dumps(payload), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "pool sizes"):
             load_brats_scenario(self.scenario_a)
+
+    def test_accepts_compatibility_modality_masks_field(self) -> None:
+        payload = json.loads(self.scenario_a.read_text(encoding="utf-8"))
+        payload["modality_masks"] = payload.pop("masks")
+        self.scenario_a.write_text(json.dumps(payload), encoding="utf-8")
+
+        scenario = load_brats_scenario(
+            self.scenario_a,
+            dataset_root=self.dataset_root,
+        )
+
+        self.assertEqual(scenario.client("C1").modalities, ("flair", "t1", "t2"))
 
 
 if __name__ == "__main__":
