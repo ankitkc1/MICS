@@ -16,6 +16,10 @@ checkpoint schema on a materialized scenario. Its deliberately truncated local
 training is not a model-quality experiment. Full studies must remove the batch
 limit and use the subsequently validated whole-volume evaluation schedule.
 
+`checkpoint_validation_smoke.slurm` consumes a completed run selected through
+`MICS_RUN_DIR`. It evaluates only a small validation subset and refuses to use
+the locked test partition.
+
 For future array studies, each task must receive an immutable experiment
 configuration, seed, output directory, and run identifier. The task must refuse
 to overwrite a completed run. Scheduler job ID and array task ID must be

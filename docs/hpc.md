@@ -137,6 +137,24 @@ records, and a resumable checkpoint. Because local training is truncated, its
 loss and patch Dice values are integration diagnostics and not manuscript
 performance.
 
+Validate checkpoint-based whole-volume evaluation using the completed balanced
+smoke run. Supply its absolute run directory:
+
+    export MICS_RUN_DIR=$HOME/MICS/results/uniform-balanced-smoke-<job-id>
+    bash -n hpc/slurm/checkpoint_validation_smoke.slurm
+    sbatch hpc/slurm/checkpoint_validation_smoke.slurm
+
+This job evaluates one validation case from each of the eight clients using
+that client's recorded modality mask. It verifies checkpoint reconstruction,
+sliding-window inference, WT/TC/ET Dice and HD95, per-client reductions,
+macro-client and sample-weighted reductions, timing, and memory accounting. The
+eight-case subset is an integration check, not a performance result.
+
+Full training retains `last.pt` every round and archives a checkpoint every ten
+rounds, plus the final round. Full validation uses all 48 validation cases at
+those preregistered checkpoints. Local-test and global-test evaluation remain
+locked until the selection method and hyperparameters are frozen.
+
 ## Training and array studies
 
 The future training entry point should accept a complete experiment

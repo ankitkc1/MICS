@@ -146,6 +146,65 @@ class UniformBaselineRunnerTests(unittest.TestCase):
             self.assertEqual(status["next_round"], 1)
             self.assertEqual(len(metrics), 1)
             self.assertTrue((run_dir / "checkpoints" / "last.pt").is_file())
+            self.assertTrue(
+                (run_dir / "checkpoints" / "after_round_0001.pt").is_file()
+            )
+
+            evaluation = subprocess.run(
+                (
+                    sys.executable,
+                    str(
+                        project_root
+                        / "scripts"
+                        / "evaluate_brats_checkpoint.py"
+                    ),
+                    "--run-dir",
+                    str(run_dir),
+                    "--dataset-root",
+                    str(dataset_root),
+                    "--scenario-config",
+                    str(scenario_config),
+                    "--partition",
+                    "validation",
+                    "--max-cases-per-client",
+                    "1",
+                    "--roi-size",
+                    "4",
+                    "4",
+                    "4",
+                    "--device",
+                    "cpu",
+                    "--no-amp",
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if evaluation.returncode != 0:
+                self.fail(
+                    "Checkpoint evaluation subprocess failed:\n"
+                    f"stdout:\n{evaluation.stdout}\n"
+                    f"stderr:\n{evaluation.stderr}"
+                )
+            evaluation_path = (
+                run_dir
+                / "evaluations"
+                / "validation_subset_after_round_0001.json"
+            )
+            evaluation_payload = json.loads(
+                evaluation_path.read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "MICS CHECKPOINT WHOLE-VOLUME EVALUATION PASSED",
+                evaluation.stdout,
+            )
+            self.assertEqual(
+                evaluation_payload["purpose"],
+                "integration_smoke_not_model_quality",
+            )
+            self.assertEqual(evaluation_payload["evaluation"]["case_count"], 2)
 
 
 if __name__ == "__main__":

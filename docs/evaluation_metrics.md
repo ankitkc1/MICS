@@ -36,6 +36,12 @@ not inferred from Python object size or in-process simulator memory copies.
 Training-patch Dice is retained only as an optimization diagnostic; all model
 quality claims use held-out whole-volume reconstruction.
 
+Validation metrics are computed at preregistered archived checkpoints, every
+ten communication rounds by default. The evaluator reports per-client,
+macro-client, and sample-weighted reductions. Development never evaluates the
+local-test or global-test cases; those partitions are opened only after method
+and hyperparameter choices are frozen.
+
 ## Client-level outcomes
 
 - macro-client and sample-weighted performance;

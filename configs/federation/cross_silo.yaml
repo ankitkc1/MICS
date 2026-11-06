@@ -3,6 +3,7 @@ federation:
   num_clients: 8
   rounds: 150
   clients_per_round: 2
+  checkpoint_every: 10
   local_epochs: 1
   aggregation: component_weighted_mean
   server_has_training_data: false

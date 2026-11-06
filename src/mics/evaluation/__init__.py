@@ -13,6 +13,7 @@ from .sliding_window import (
     sliding_window_inference,
     sliding_window_starts,
 )
+from .federated import evaluate_brats_client_partition
 
 __all__ = [
     "BRATS_HD95_PENALTY_MM",
@@ -21,6 +22,7 @@ __all__ = [
     "brats_dice_from_logits",
     "brats_region_dice",
     "brats_region_hd95",
+    "evaluate_brats_client_partition",
     "gaussian_importance_map",
     "sliding_window_inference",
     "sliding_window_starts",

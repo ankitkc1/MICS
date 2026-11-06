@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--rounds", type=int, default=150)
     parser.add_argument("--clients-per-round", type=int, default=2)
+    parser.add_argument("--checkpoint-every", type=int, default=10)
     parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--num-levels", type=int, default=4)
     parser.add_argument("--fusion", default="mean_var")
@@ -146,6 +147,7 @@ def _resolved_config(
         "federation": {
             "rounds": arguments.rounds,
             "clients_per_round": arguments.clients_per_round,
+            "checkpoint_every": arguments.checkpoint_every,
             "aggregation": "component_weighted_mean",
         },
         "training": {
@@ -235,6 +237,8 @@ def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
         raise SystemExit("Set MICS_DATA_ROOT or pass --dataset-root.")
     if arguments.rounds <= 0 or arguments.clients_per_round <= 0:
         raise SystemExit("Round count and client budget must be positive.")
+    if arguments.checkpoint_every <= 0:
+        raise SystemExit("Checkpoint interval must be positive.")
     if arguments.batch_size <= 0 or arguments.num_workers < 0:
         raise SystemExit("Batch size or worker count is invalid.")
     if min(arguments.model_seed, arguments.selection_seed, arguments.data_seed) < 0:
@@ -481,18 +485,26 @@ def _run_rounds(
                 upload_by_client=upload_by_client,
             )
             recorder.record_round(round_record)
+            completed_rounds = round_index + 1
+            archive_round = (
+                completed_rounds
+                if completed_rounds % arguments.checkpoint_every == 0
+                or completed_rounds == arguments.rounds
+                else None
+            )
             recorder.save_checkpoint(
                 _checkpoint(
                     model,
                     selector,
                     recorder=recorder,
-                    next_round=round_index + 1,
+                    next_round=completed_rounds,
                     selection_counts=selection_counts,
                     last_selected_round=last_selected_round,
                     modality_last_updated_round=modality_last_updated_round,
                     cumulative_download_bytes=cumulative_download_bytes,
                     cumulative_upload_bytes=cumulative_upload_bytes,
-                )
+                ),
+                archive_completed_rounds=archive_round,
             )
             recorder.mark_round_complete(next_round=round_index + 1)
             print(json.dumps(round_record, sort_keys=True), flush=True)

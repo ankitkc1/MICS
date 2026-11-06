@@ -19,13 +19,14 @@ model or mutate data-loader state.
 src/mics/data owns preprocessing assumptions, sample loading, named modality
 mapping, and deterministic patch extraction.
 
-src/mics/training owns losses and will later own local optimization. It must not
-choose participating clients.
+src/mics/training owns losses and local optimization. It must not choose
+participating clients.
 
-src/mics/evaluation owns metric definitions and will later own federated
-evaluation.
+src/mics/evaluation owns metric definitions, whole-volume inference, and
+federated client/macro/sample-weighted reductions.
 
-A future experiment module will own resolved configuration and run metadata.
+src/mics/experiments owns resolved run provenance, checkpoints, selection
+diagnostics, and communication accounting.
 
 ## Thin entry points
 
@@ -52,9 +53,9 @@ revision, configuration, and raw run IDs from which it was derived.
 
 ## Tests
 
-Unit tests verify model blocks, selector behavior, and aggregation independently.
-Integration tests will later cover a tiny deterministic federated round using
-synthetic fixtures.
+Unit tests verify model blocks, selector behavior, aggregation, evaluation, and
+tracking independently. Integration tests cover a deterministic federated
+round and checkpoint-based whole-volume evaluation using synthetic fixtures.
 
 ## Paper-to-code mapping
 

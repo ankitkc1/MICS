@@ -32,12 +32,13 @@ class RunRecorderTests(unittest.TestCase):
         recorder.mark_running(next_round=0)
         recorder.record_selection({"round": 0, "selected_clients": ["C1"]})
         recorder.record_round({"round": 0, "loss": 1.25})
-        recorder.save_checkpoint(
+        archive = recorder.save_checkpoint(
             {
                 "config_fingerprint": recorder.config_fingerprint,
                 "next_round": 1,
                 "tensor": torch.tensor([1.0]),
-            }
+            },
+            archive_completed_rounds=1,
         )
         recorder.mark_round_complete(next_round=1)
 
@@ -45,6 +46,11 @@ class RunRecorderTests(unittest.TestCase):
         status = recorder.read_status()
         metric = json.loads(recorder.metrics_path.read_text(encoding="utf-8"))
         self.assertEqual(checkpoint["next_round"], 1)
+        self.assertEqual(
+            archive,
+            recorder.checkpoint_dir / "after_round_0001.pt",
+        )
+        self.assertTrue(archive.is_file())
         self.assertTrue(
             torch.equal(checkpoint["tensor"], torch.tensor([1.0]))
         )

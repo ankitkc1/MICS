@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -47,6 +48,20 @@ def _config_fingerprint(config: Any) -> str:
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def configuration_fingerprint(config: Any) -> str:
+    """Return the canonical SHA-256 fingerprint used by run checkpoints."""
+
+    return _config_fingerprint(config)
+
+
+def atomic_write_json(path: str | Path, value: Any) -> None:
+    """Write finite JSON through an atomic same-directory replacement."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_json(destination, value)
 
 
 def _git_value(project_root: Path, *arguments: str) -> str | None:
@@ -209,10 +224,30 @@ class RunRecorder:
     def record_round(self, record: dict[str, Any]) -> None:
         self._append_jsonl(self.metrics_path, record)
 
-    def save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+    def save_checkpoint(
+        self,
+        checkpoint: dict[str, Any],
+        *,
+        archive_completed_rounds: int | None = None,
+    ) -> Path | None:
         temporary = self.checkpoint_dir / ".last.pt.tmp"
         torch.save(checkpoint, temporary)
         os.replace(temporary, self.checkpoint_path)
+        if archive_completed_rounds is None:
+            return None
+        if archive_completed_rounds <= 0:
+            raise ValueError("archive_completed_rounds must be positive.")
+        archive = self.checkpoint_dir / (
+            f"after_round_{archive_completed_rounds:04d}.pt"
+        )
+        if archive.exists():
+            raise FileExistsError(f"Archived checkpoint already exists: {archive}")
+        archive_temporary = self.checkpoint_dir / f".{archive.name}.tmp"
+        shutil.copyfile(self.checkpoint_path, archive_temporary)
+        with archive_temporary.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(archive_temporary, archive)
+        return archive
 
     def load_checkpoint(self) -> dict[str, Any]:
         value = torch.load(

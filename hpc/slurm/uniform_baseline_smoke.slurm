@@ -43,6 +43,7 @@ python scripts/run_uniform_baseline.py \
     --run-id "$RUN_ID" \
     --rounds 2 \
     --clients-per-round 2 \
+    --checkpoint-every 2 \
     --base-channels 16 \
     --max-batches-per-epoch "$MAX_BATCHES" \
     --model-seed 101 \
@@ -50,5 +51,6 @@ python scripts/run_uniform_baseline.py \
     --data-seed 303
 
 test -f "$RESULTS_ROOT/$RUN_ID/checkpoints/last.pt"
+test -f "$RESULTS_ROOT/$RUN_ID/checkpoints/after_round_0002.pt"
 grep -q '"state": "completed"' "$RESULTS_ROOT/$RUN_ID/status.json"
 echo "MICS UNIFORM-RANDOM BASELINE SMOKE JOB PASSED"
