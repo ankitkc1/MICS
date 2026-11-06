@@ -11,9 +11,10 @@ runs the full unit suite, and performs a forward/backward pass:
     export MICS_CONDA_ENV=mics
     sbatch hpc/slurm/model_smoke.slurm
 
-Do not create the full training job until the federated runner and checkpoint
-schema are implemented. A training script submitted before those contracts are
-stable would produce non-comparable results.
+The uniform-random baseline smoke job validates the federated runner and
+checkpoint schema on a materialized scenario. Its deliberately truncated local
+training is not a model-quality experiment. Full studies must remove the batch
+limit and use the subsequently validated whole-volume evaluation schedule.
 
 For future array studies, each task must receive an immutable experiment
 configuration, seed, output directory, and run identifier. The task must refuse

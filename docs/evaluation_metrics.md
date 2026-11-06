@@ -30,6 +30,12 @@ Raw HPC timing is reported as an implementation measurement, not as a general
 systems claim. Comparisons under system heterogeneity require identical,
 controlled client-latency and availability traces.
 
+Communication is counted from the exact tensor sizes of the modality encoders
+and shared components logically transferred by the federated protocol. It is
+not inferred from Python object size or in-process simulator memory copies.
+Training-patch Dice is retained only as an optimization diagnostic; all model
+quality claims use held-out whole-volume reconstruction.
+
 ## Client-level outcomes
 
 - macro-client and sample-weighted performance;

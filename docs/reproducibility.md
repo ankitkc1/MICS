@@ -64,6 +64,12 @@ A resumable checkpoint must contain:
 - best metrics and evaluation history;
 - resolved configuration and source revision.
 
+The uniform baseline runner resets AdamW for every client and round, following
+the current FedAvg contract, so no persistent client optimizer state exists to
+checkpoint. It does checkpoint global components, selector and PyTorch random
+states, participation history, modality staleness, and cumulative communication
+counters.
+
 The loader must validate the checkpoint schema and configuration compatibility.
 The coordinator must never restart at a completed round or overwrite a previous
 run without an explicit, recorded action.

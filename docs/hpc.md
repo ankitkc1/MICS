@@ -115,6 +115,19 @@ This diagnostic uses one C1 training case only to validate shape restoration,
 window coverage, blending, Dice, and HD95. Journal results must instead use the
 fixed held-out validation and test case lists.
 
+After the materialized scenarios pass validation, run the uniform-random
+training pipeline on Scenario A:
+
+    bash -n hpc/slurm/uniform_baseline_smoke.slurm
+    sbatch hpc/slurm/uniform_baseline_smoke.slurm
+
+This job performs two rounds with two selected clients and two patches per
+client. It validates scenario-driven modality masks, independent uniform
+selection, component-wise aggregation, communication accounting, JSONL metric
+records, and a resumable checkpoint. Because local training is truncated, its
+loss and patch Dice values are integration diagnostics and not manuscript
+performance. Repeat with `MICS_SCENARIO=B` after Scenario A passes.
+
 ## Training and array studies
 
 The future training entry point should accept a complete experiment

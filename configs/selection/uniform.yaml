@@ -1,5 +1,5 @@
 selection:
   name: uniform_random
-  seed: 42
+  seed: 202
   independent_rng_stream: true
   without_replacement: true
