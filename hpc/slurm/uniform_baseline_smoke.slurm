@@ -16,7 +16,7 @@ PROJECT_ROOT=${MICS_PROJECT_ROOT:-$HOME/MICS}
 ENV_NAME=${MICS_CONDA_ENV:-mics}
 DATASET_ROOT=${MICS_DATA_ROOT:-$HOME/BraTS2020_npy}
 BUNDLE_ROOT=${MICS_SPLIT_BUNDLE_ROOT:-$HOME/pmcs/split/generated/data_seed_20260905}
-SCENARIO=${MICS_SCENARIO:-A}
+SCENARIO_CONFIG=${MICS_SCENARIO_CONFIG:-$BUNDLE_ROOT/balanced/materialized_config.json}
 RESULTS_ROOT=${MICS_RESULTS_ROOT:-$PROJECT_ROOT/results}
 MAX_BATCHES=${MICS_SMOKE_BATCHES:-2}
 
@@ -25,12 +25,12 @@ conda activate "$ENV_NAME"
 cd "$PROJECT_ROOT"
 
 test -d "$DATASET_ROOT"
-test -f "$BUNDLE_ROOT/split${SCENARIO}/materialized_config.json"
+test -f "$SCENARIO_CONFIG"
 
 export PYTHONHASHSEED=0
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-RUN_ID="uniform-scenario-${SCENARIO}-smoke-${SLURM_JOB_ID}"
+RUN_ID="uniform-balanced-smoke-${SLURM_JOB_ID}"
 
 echo "Source revision: $(git rev-parse HEAD)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
@@ -38,7 +38,7 @@ python scripts/validate_install.py
 
 python scripts/run_uniform_baseline.py \
     --dataset-root "$DATASET_ROOT" \
-    --scenario-config "$BUNDLE_ROOT/split${SCENARIO}/materialized_config.json" \
+    --scenario-config "$SCENARIO_CONFIG" \
     --output-root "$RESULTS_ROOT" \
     --run-id "$RUN_ID" \
     --rounds 2 \

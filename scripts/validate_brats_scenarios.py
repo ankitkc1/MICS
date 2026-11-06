@@ -18,7 +18,10 @@ def parse_arguments() -> argparse.Namespace:
         required=True,
         action="append",
         type=Path,
-        help="Path to materialized_config.json; repeat for matched scenarios.",
+        help=(
+            "Path to materialized_config.json; repeat only for an optional "
+            "controlled comparison."
+        ),
     )
     return parser.parse_args()
 

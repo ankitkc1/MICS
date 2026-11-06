@@ -20,9 +20,8 @@ MICS method under identical resource budgets. Additional baselines should be
 implemented through the same ClientSelector interface and must disclose any
 extra probing or communication.
 
-The BraTS publication scenarios are loaded from their generated
-`materialized_config.json` files. Scenario A and Scenario B hold all case
-assignments fixed and change the modality masks, permitting a matched test of
-modality heterogeneity. The loader rejects duplicate assignments, leakage,
-incorrect modality-pool metadata, and incomplete dataset coverage before
-training begins.
+The BraTS publication experiment uses one symmetric, balanced modality
+scenario loaded from its generated `materialized_config.json`. Every selection
+method receives the same clients, masks, case assignments, and budget. The
+loader rejects duplicate assignments, leakage, incorrect modality-pool
+metadata, and incomplete dataset coverage before training begins.

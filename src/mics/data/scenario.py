@@ -39,15 +39,18 @@ def _resolve_materialized_file(
     declared_path: Any,
     *,
     local_directory: Path,
+    additional_local_directories: tuple[Path, ...] = (),
 ) -> Path:
     """Resolve a recorded file while allowing a bundle to move between hosts."""
 
     if not isinstance(declared_path, str) or not declared_path.strip():
         raise ValueError("A materialized split file path must be a non-empty string.")
     declared = Path(declared_path)
-    candidates = [local_directory / declared.name]
-    if not declared.is_absolute():
-        candidates.append(local_directory / declared)
+    candidates = []
+    for directory in (local_directory, *additional_local_directories):
+        candidates.append(directory / declared.name)
+        if not declared.is_absolute():
+            candidates.append(directory / declared)
     candidates.append(declared)
 
     checked: list[Path] = []
@@ -339,7 +342,8 @@ def load_brats_scenario(
         raise ValueError("Scenario configuration requires global_test_file.")
     global_test_file = _resolve_materialized_file(
         payload["global_test_file"],
-        local_directory=path.parent.parent,
+        local_directory=path.parent,
+        additional_local_directories=(path.parent.parent,),
     )
     global_test_case_ids = read_case_ids(global_test_file)
     covered = _validate_case_assignments(client_tuple, global_test_case_ids)

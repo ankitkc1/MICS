@@ -23,18 +23,27 @@ Point the configuration to the dataset already present on the cluster:
 No dataset copy is required.
 
 `MICS_SPLIT_ROOT` above is retained only for the completed legacy integration
-smoke tests. Publication experiments use the validated scenario bundle:
+smoke tests. Publication experiments use one symmetric, balanced scenario.
+Materialize it once from the validated SplitA case assignments; the SplitA
+modality masks are explicitly discarded:
 
     export MICS_SPLIT_BUNDLE_ROOT=$HOME/pmcs/split/generated/data_seed_20260905
+    python scripts/materialize_balanced_brats_scenario.py \
+      --dataset-root "$MICS_DATA_ROOT" \
+      --source-config "$MICS_SPLIT_BUNDLE_ROOT/splitA/materialized_config.json" \
+      --output-directory "$MICS_SPLIT_BUNDLE_ROOT/balanced"
+
+Then validate the resulting immutable bundle:
+
     python scripts/validate_brats_scenarios.py \
       --dataset-root "$MICS_DATA_ROOT" \
-      --scenario-config "$MICS_SPLIT_BUNDLE_ROOT/splitA/materialized_config.json" \
-      --scenario-config "$MICS_SPLIT_BUNDLE_ROOT/splitB/materialized_config.json"
+      --scenario-config "$MICS_SPLIT_BUNDLE_ROOT/balanced/materialized_config.json"
 
 The command must report 368 covered cases, 222 training cases, 48 validation
-cases, 48 local-test cases, 50 global-test cases, identical case assignments
-between scenarios, and changed modality masks. The expected modality-pool sizes
-are FLAIR/T1ce/T1/T2 = 7/2/5/4 for A and 2/7/5/4 for B. It must finish with
+cases, 48 local-test cases, and 50 global-test cases. Each modality pool must
+contain five clients. The materializer assigns two complete-modality templates
+and all six unique modality-pair templates using the fixed profile seed 1701,
+independently of patient data. Validation must finish with
 `MICS BRATS SCENARIO VALIDATION PASSED`.
 
 Validate the real arrays and one existing client split before training:
@@ -115,8 +124,8 @@ This diagnostic uses one C1 training case only to validate shape restoration,
 window coverage, blending, Dice, and HD95. Journal results must instead use the
 fixed held-out validation and test case lists.
 
-After the materialized scenarios pass validation, run the uniform-random
-training pipeline on Scenario A:
+After the balanced scenario passes validation, run the uniform-random training
+pipeline:
 
     bash -n hpc/slurm/uniform_baseline_smoke.slurm
     sbatch hpc/slurm/uniform_baseline_smoke.slurm
@@ -126,7 +135,7 @@ client. It validates scenario-driven modality masks, independent uniform
 selection, component-wise aggregation, communication accounting, JSONL metric
 records, and a resumable checkpoint. Because local training is truncated, its
 loss and patch Dice values are integration diagnostics and not manuscript
-performance. Repeat with `MICS_SCENARIO=B` after Scenario A passes.
+performance.
 
 ## Training and array studies
 

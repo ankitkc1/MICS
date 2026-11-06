@@ -44,12 +44,11 @@ train/validation/local-test files, and the global-test file. It does not copy or
 relocate the dataset stored on the HPC. Absolute paths recorded by the split
 generator are resolved portably against the scenario bundle.
 
-All compared selection methods must use the same client mapping and case split.
-The current Scenario A and Scenario B are matched modality-availability
-conditions: their case assignments are identical and their modality masks
-differ. They must not be described as independent data partitions or averaged
-as independent repetitions. Independent model/selection seeds remain necessary
-for uncertainty estimates.
+All compared selection methods must use the same client mapping, modality
+profile, and case split. The primary balanced profile is generated independently
+of patient data: two clients receive all modalities and the other six receive
+the six unique modality pairs. Every modality has equal prevalence. Independent
+model and selection seeds remain necessary for uncertainty estimates.
 
 ## Checkpoint contract
 

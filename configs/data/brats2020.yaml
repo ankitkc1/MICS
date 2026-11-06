@@ -32,18 +32,16 @@ dataset:
     foreground_probability: 0.5
 
 clients:
-  # A materialized scenario is authoritative for both case partitions and
-  # modality masks. SplitA and SplitB deliberately share case assignments but
-  # reverse FLAIR/T1ce availability to isolate modality heterogeneity.
+  # One materialized scenario is authoritative for both case partitions and
+  # modality masks. Availability is symmetric across modalities.
   scenario_bundle_root_env: MICS_SPLIT_BUNDLE_ROOT
   scenario_config_filename: materialized_config.json
-  scenarios:
-    A:
-      directory: splitA
-      expected_modality_pool_sizes: {flair: 7, t1ce: 2, t1: 5, t2: 4}
-    B:
-      directory: splitB
-      expected_modality_pool_sizes: {flair: 2, t1ce: 7, t1: 5, t2: 4}
+  scenario:
+    id: balanced
+    directory: balanced
+    profile: symmetric_balanced_v1
+    profile_seed: 1701
+    expected_modality_pool_sizes: {flair: 5, t1ce: 5, t1: 5, t2: 5}
   global_test_filename: global_test.csv
 
 legacy_integration_smoke_tests:
