@@ -109,6 +109,16 @@ Report the extra inference, probing, and communication cost of methods that
 need losses, gradients, embeddings, or modality ablations before selection.
 Selection-only dry runs must never be presented as segmentation performance.
 
+For leave-one-modality-out importance, record the checkpoint hash, scenario
+hash, eligible clients, native and ablated modality sets, paired case IDs,
+region weights, signed case and client effects, uncertainty, clipping and
+normalisation fallback, and exact probe cost. Importance estimation is
+validation-only. The estimator has no test-partition option, and the generated
+record must state that test data were not accessed. Once validation cases are
+used to calibrate the selector, their scores are not labelled as independent
+model-selection evidence; use a disjoint validation role if that evidence is
+needed.
+
 ## Suggested generated run layout
 
     results/study_name/run_id/

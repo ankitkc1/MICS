@@ -8,7 +8,17 @@ selection:
   budget_type: clients_per_round
   budget: 2
   modality_importance:
-    estimator: to_be_defined
+    estimator: paired_leave_one_modality_out_validation_dice
+    partition_role: selection_probe
+    primary_reduction: macro_client
+    region_weights:
+      WT: 0.3333333333333333
+      TC: 0.3333333333333333
+      ET: 0.3333333333333333
+    preserve_signed_estimate: true
+    selection_transform: positive_clip_then_epsilon_floor
+    epsilon: 1.0e-6
+    refresh_interval_rounds: null  # Preregister after measuring probe cost.
   redundancy:
     kernel: to_be_defined
   participation_history:

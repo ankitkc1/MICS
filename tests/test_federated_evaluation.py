@@ -12,7 +12,11 @@ import numpy as np
 
 from mics import MultiEncoderUNet3D
 from mics.data import load_brats_scenario
-from mics.evaluation import evaluate_brats_client_partition
+from mics.evaluation import (
+    estimate_leave_one_modality_out_importance,
+    evaluate_brats_client_partition,
+    normalise_nonnegative_importance,
+)
 
 
 class FederatedEvaluationTests(unittest.TestCase):
@@ -131,6 +135,54 @@ class FederatedEvaluationTests(unittest.TestCase):
         self.assertFalse(result["complete_partition"])
         self.assertEqual(result["per_client"]["C1"]["modalities"], ["flair"])
         self.assertEqual(result["per_client"]["C2"]["modalities"], ["t2"])
+
+    def test_validation_only_leave_one_out_importance_and_probe_cost(self) -> None:
+        result = estimate_leave_one_modality_out_importance(
+            self.model,
+            self.scenario,
+            self.dataset_root,
+            roi_size=(4, 4, 4),
+            overlap=0.5,
+            device="cpu",
+            amp=False,
+        )
+
+        self.assertEqual(result["partition"], "validation")
+        self.assertFalse(result["test_data_accessed"])
+        self.assertTrue(result["complete_validation_probe"])
+        self.assertEqual(result["primary_reduction"], "macro_client")
+        self.assertEqual(
+            result["region_weights"],
+            {"WT": 1.0 / 3.0, "TC": 1.0 / 3.0, "ET": 1.0 / 3.0},
+        )
+        self.assertEqual(set(result["modalities"]), {"flair", "t1ce", "t1", "t2"})
+        self.assertAlmostEqual(
+            sum(result["normalised_selection_weights"].values()),
+            1.0,
+        )
+        for modality in result["modalities"].values():
+            self.assertEqual(modality["client_count"], 1)
+            self.assertEqual(modality["case_count"], 1)
+            self.assertEqual(len(modality["case_deltas"]), 1)
+            self.assertIsNone(
+                modality["uncertainty_across_client_means"]["standard_error"]
+            )
+        self.assertEqual(
+            result["probe_cost"]["native_baseline_case_evaluations"], 2
+        )
+        self.assertEqual(
+            result["probe_cost"]["additional_ablation_case_evaluations"], 4
+        )
+        self.assertEqual(result["probe_cost"]["total_case_evaluations"], 6)
+        self.assertEqual(result["probe_cost"]["total_sliding_windows"], 6)
+
+    def test_nonpositive_importance_uses_explicit_uniform_fallback(self) -> None:
+        weights, fallback = normalise_nonnegative_importance(
+            {"flair": -0.1, "t1ce": 0.0, "t1": -0.2, "t2": 0.0}
+        )
+
+        self.assertTrue(fallback)
+        self.assertEqual(set(weights.values()), {0.25})
 
 
 if __name__ == "__main__":

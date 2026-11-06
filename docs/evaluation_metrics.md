@@ -42,6 +42,43 @@ macro-client, and sample-weighted reductions. Development never evaluates the
 local-test or global-test cases; those partitions are opened only after method
 and hyperparameter choices are frozen.
 
+## Validation-derived modality importance
+
+MICS estimates modality importance with paired leave-one-modality-out probes.
+For a validation case `i` held by client `k`, let `D[k,i,r](A[k])` be the Dice
+for region `r` under the client's native modality set `A[k]`. For every
+available modality `m` that can be removed without leaving an empty input,
+the signed case effect is
+
+    delta[k,i,m,r] = D[k,i,r](A[k]) - D[k,i,r](A[k] without m).
+
+WT, TC, and ET receive equal weights in the primary analysis. Region weights
+are configurable but must be fixed before the comparative study; no BraTS
+region or modality is favoured by default. Case effects are first averaged
+within client, then across eligible clients, so a client with a larger probe
+partition cannot dominate the estimate. The estimator retains region-wise,
+sample-weighted, per-client, and signed effects together with the standard
+error across client means.
+
+The subset objective requires non-negative modality weights. Therefore only
+the selector-facing copy is clipped at zero and given a small positive floor
+before normalisation. The signed estimate is never discarded. If all signed
+effects are non-positive, the implementation records an explicit fallback and
+uses uniform weights rather than inventing a ranking.
+
+These probes consume validation data as a selector/calibration input. Once
+used for this purpose, the same scores are not described as an independent
+generalisation estimate. Local-test and global-test partitions remain locked
+until the complete protocol, hyperparameters, checkpoint rule, importance
+refresh schedule, and target thresholds are frozen. If independent validation
+model selection is required, a disjoint selection-probe partition must be
+materialised before the main experiments.
+
+Probe cost is reported separately: native baseline case evaluations,
+additional modality-ablation evaluations, sliding-window count, inference and
+wall time, and peak GPU memory. A truncated one-case-per-client run validates
+the pipeline only and cannot establish scientific modality weights.
+
 ## Client-level outcomes
 
 - macro-client and sample-weighted performance;
@@ -54,6 +91,7 @@ improve the average while repeatedly excluding particular clients.
 ## MICS explanatory diagnostics
 
 - per-round modality coverage;
+- signed and normalised validation-derived modality importance;
 - impact-weighted modality coverage;
 - component update counts;
 - client and modality staleness;

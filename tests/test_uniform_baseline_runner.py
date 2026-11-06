@@ -66,14 +66,14 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                         "data_seed": 1,
                         "modality_order": ["FLAIR", "T1ce", "T1", "T2"],
                         "masks": {
-                            "C1": [1, 0, 0, 0],
-                            "C2": [0, 1, 0, 0],
+                            "C1": [1, 1, 0, 0],
+                            "C2": [0, 0, 1, 1],
                         },
                         "expected_modality_pool_sizes": {
                             "FLAIR": 1,
                             "T1ce": 1,
-                            "T1": 0,
-                            "T2": 0,
+                            "T1": 1,
+                            "T2": 1,
                         },
                         "global_test_file": str(global_test),
                         "clients": clients,
@@ -205,6 +205,67 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                 "integration_smoke_not_model_quality",
             )
             self.assertEqual(evaluation_payload["evaluation"]["case_count"], 2)
+
+            importance = subprocess.run(
+                (
+                    sys.executable,
+                    str(
+                        project_root
+                        / "scripts"
+                        / "estimate_modality_importance.py"
+                    ),
+                    "--run-dir",
+                    str(run_dir),
+                    "--dataset-root",
+                    str(dataset_root),
+                    "--scenario-config",
+                    str(scenario_config),
+                    "--max-cases-per-client",
+                    "1",
+                    "--roi-size",
+                    "4",
+                    "4",
+                    "4",
+                    "--device",
+                    "cpu",
+                    "--no-amp",
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if importance.returncode != 0:
+                self.fail(
+                    "Modality-importance subprocess failed:\n"
+                    f"stdout:\n{importance.stdout}\n"
+                    f"stderr:\n{importance.stderr}"
+                )
+            importance_path = (
+                run_dir
+                / "evaluations"
+                / "modality_importance_subset_after_round_0001.json"
+            )
+            importance_payload = json.loads(
+                importance_path.read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "MICS VALIDATION-ONLY MODALITY IMPORTANCE ESTIMATION PASSED",
+                importance.stdout,
+            )
+            self.assertEqual(
+                importance_payload["purpose"],
+                "integration_smoke_not_modality_importance",
+            )
+            self.assertFalse(
+                importance_payload["importance"]["test_data_accessed"]
+            )
+            self.assertEqual(
+                importance_payload["importance"]["probe_cost"]
+                ["total_case_evaluations"],
+                6,
+            )
 
 
 if __name__ == "__main__":
