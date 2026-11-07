@@ -20,8 +20,10 @@ from mics.experiments import (
     FederatedTrainingLoopConfig,
     LoadedModalityImportance,
     RunRecorder,
+    SystemTrace,
     collect_runtime_metadata,
     load_modality_importance_record,
+    load_system_trace,
     run_tracked_federated_training,
     sha256_file,
 )
@@ -41,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MICS_DATA_ROOT"),
     )
     parser.add_argument("--scenario-config", required=True, type=Path)
+    parser.add_argument("--system-trace", type=Path)
     parser.add_argument("--importance-output", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path("results"))
     parser.add_argument("--run-id", required=True)
@@ -55,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--saturation-level", type=int, default=1)
     parser.add_argument("--safety-margin", type=float, default=0.1)
     parser.add_argument("--impact-weight", type=float, default=1.0)
+    parser.add_argument("--reliability-aware", action="store_true")
     parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--num-levels", type=int, default=4)
     parser.add_argument("--fusion", default="mean_var")
@@ -143,6 +147,7 @@ def _resolved_config(
     scenario: BraTSScenario,
     importance: LoadedModalityImportance | None,
     calibration: Mapping[str, Any],
+    system_trace: SystemTrace | None,
 ) -> dict[str, Any]:
     is_smoke = arguments.max_batches_per_epoch is not None
     method = "mics_core" if arguments.impact_weight == 0.0 else "mics_impact"
@@ -199,8 +204,12 @@ def _resolved_config(
             ),
             "importance_refresh": "fixed_for_this_run",
             "target_calibration": dict(calibration),
-            "reliability_aware": False,
-            "completion_model": "deterministic_success_in_current_simulator",
+            "reliability_aware": arguments.reliability_aware,
+            "completion_model": (
+                "deterministic_success"
+                if system_trace is None
+                else "fixed_selection_independent_potential_outcome_trace"
+            ),
         },
         "training": {
             "patch_size": list(arguments.patch_size),
@@ -222,6 +231,9 @@ def _resolved_config(
             "data": arguments.data_seed,
         },
         "device": arguments.device,
+        "system_trace": (
+            None if system_trace is None else system_trace.source_record()
+        ),
     }
 
 
@@ -234,6 +246,19 @@ def main() -> None:
     )
     if arguments.clients_per_round > len(scenario.clients):
         raise SystemExit("Client budget exceeds the scenario client count.")
+    system_trace = (
+        None
+        if arguments.system_trace is None
+        else load_system_trace(arguments.system_trace)
+    )
+    if system_trace is not None and any(
+        probability < 1.0
+        for probability in system_trace.availability_probabilities.values()
+    ):
+        raise SystemExit(
+            "MICS availability traces require state-aware target calibration, "
+            "which is not enabled in this runner yet."
+        )
     importance = _load_importance(arguments)
     levels = {
         modality: arguments.saturation_level for modality in BRATS_MODALITIES
@@ -246,6 +271,11 @@ def main() -> None:
         priorities={modality: 1.0 for modality in BRATS_MODALITIES},
         service_type=arguments.service_type,
         saturation_levels=levels,
+        completion_probabilities=(
+            None
+            if system_trace is None
+            else system_trace.completion_probabilities
+        ),
         oracle_factor=1.0 - 1.0 / math.e,
         safety_margin=arguments.safety_margin,
     )
@@ -262,6 +292,7 @@ def main() -> None:
         scenario,
         importance,
         calibration.as_dict(),
+        system_trace,
     )
     model = MultiEncoderUNet3D(
         modalities=OrderedDict((name, 1) for name in BRATS_MODALITIES),
@@ -277,7 +308,7 @@ def main() -> None:
         service_type=arguments.service_type,
         saturation_levels=levels,
         impact_weight=arguments.impact_weight,
-        reliability_aware=False,
+        reliability_aware=arguments.reliability_aware,
     )
     training = LocalTrainingConfig(
         local_epochs=arguments.local_epochs,
@@ -318,6 +349,7 @@ def main() -> None:
         component_importance=(
             {} if importance is None else importance.weights
         ),
+        system_trace=system_trace,
         resume=arguments.resume,
     )
 

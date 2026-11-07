@@ -107,6 +107,7 @@ class FederatedRoundTests(unittest.TestCase):
         self.assertEqual(second.component_update_counts, expected_counts)
         self.assertEqual(first.selected_client_ids, ("C1", "C6"))
         self.assertEqual(second.selected_client_ids, ("C1", "C6"))
+        self.assertEqual(first.successful_client_ids, ("C1", "C6"))
         self.assertGreater(_floating_distance(initial, after_first), 0.0)
         self.assertGreater(_floating_distance(after_first, after_second), 0.0)
         for state in after_second.values():
@@ -134,6 +135,33 @@ class FederatedRoundTests(unittest.TestCase):
                 device="cpu",
                 training_config=LocalTrainingConfig(amp=False),
             )
+
+    def test_all_failed_attempts_carry_the_global_model_forward(self) -> None:
+        model = MultiEncoderUNet3D(
+            modalities=OrderedDict((("flair", 1), ("t1ce", 1))),
+            num_classes=4,
+            base_channels=2,
+            num_levels=2,
+        )
+        before = model.component_state_dict(clone=True)
+
+        result = run_federated_round(
+            model,
+            (),
+            attempted_client_ids=("C1", "C6"),
+            round_index=0,
+            device="cpu",
+            training_config=LocalTrainingConfig(amp=False),
+        )
+        after = model.component_state_dict(clone=True)
+
+        self.assertEqual(result.selected_client_ids, ("C1", "C6"))
+        self.assertEqual(result.successful_client_ids, ())
+        self.assertEqual(result.examples_seen, 0)
+        self.assertTrue(
+            all(value == 0 for value in result.component_update_counts.values())
+        )
+        self.assertEqual(_floating_distance(before, after), 0.0)
 
 
 if __name__ == "__main__":

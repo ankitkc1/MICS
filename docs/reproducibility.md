@@ -31,11 +31,40 @@ At minimum, use separate deterministic streams for:
 3. client selection;
 4. data shuffling;
 5. augmentation and modality dropout;
-6. data-loader workers.
+6. data-loader workers;
+7. client availability; and
+8. client completion potential outcomes.
 
 Policies consume different numbers of selection draws. Sharing that generator
 with data shuffling silently changes local minibatch order and invalidates a
 controlled policy comparison.
+
+## Matched system-heterogeneity traces
+
+Availability and completion events must be generated before either selection
+policy runs and stored as an immutable, checksummed trace. Each round records
+the available-client set and a selection-independent completion potential for
+every client. The completion value is revealed only for a selected client, but
+is defined for all clients so that a policy cannot change the random outcomes
+by selecting a different subset. Availability and completion use separate
+random streams; resampling a low-availability round therefore cannot alter its
+completion outcomes.
+
+Paired methods must consume the exact same trace file and record its path,
+hash, seed, probability model, and round count in their resolved
+configurations. Client selections are attempts. Only selected clients whose
+potential outcome is successful may train and upload an update. Downloads are
+charged to every attempt, whereas uploads and component service are charged
+only to completed clients. Report attempts, completions, failures, completion
+rate, and queue evolution separately. A trace may not be regenerated after
+observing either policy's selections or results.
+
+The current matched-trace MICS runner supports completion heterogeneity with
+all clients available. Nontrivial availability traces require state-aware
+service-target calibration and remain disabled for MICS training until that
+calibration is implemented. The trace generator already records availability
+potential outcomes so this later extension need not change the experiment
+contract.
 
 ## Client scenario
 

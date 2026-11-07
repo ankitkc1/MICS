@@ -49,6 +49,7 @@ class FederatedRoundResult:
 
     round_index: int
     selected_client_ids: tuple[str, ...]
+    successful_client_ids: tuple[str, ...]
     local_results: tuple[LocalTrainingResult, ...]
     component_update_counts: Mapping[str, int]
     examples_seen: int
@@ -62,6 +63,7 @@ def run_federated_round(
     round_index: int,
     device: str | torch.device,
     training_config: LocalTrainingConfig | None = None,
+    attempted_client_ids: Sequence[str] | None = None,
 ) -> FederatedRoundResult:
     """Train selected clients sequentially and aggregate their components.
 
@@ -73,11 +75,20 @@ def run_federated_round(
     if round_index < 0:
         raise ValueError("round_index cannot be negative.")
     clients = tuple(selected_clients)
-    if not clients:
-        raise ValueError("At least one selected client is required.")
-    client_ids = tuple(client.client_id for client in clients)
-    if len(client_ids) != len(set(client_ids)):
-        raise ValueError("Selected client identifiers must be unique.")
+    successful_client_ids = tuple(client.client_id for client in clients)
+    attempted = (
+        successful_client_ids
+        if attempted_client_ids is None
+        else tuple(str(client_id) for client_id in attempted_client_ids)
+    )
+    if not attempted:
+        raise ValueError("At least one attempted client is required.")
+    if len(attempted) != len(set(attempted)):
+        raise ValueError("Attempted client identifiers must be unique.")
+    if len(successful_client_ids) != len(set(successful_client_ids)):
+        raise ValueError("Successful client identifiers must be unique.")
+    if not set(successful_client_ids).issubset(attempted):
+        raise ValueError("Successful clients must be a subset of attempted clients.")
 
     settings = training_config or LocalTrainingConfig()
     target_device = torch.device(device)
@@ -119,7 +130,8 @@ def run_federated_round(
     }
     return FederatedRoundResult(
         round_index=round_index,
-        selected_client_ids=client_ids,
+        selected_client_ids=attempted,
+        successful_client_ids=successful_client_ids,
         local_results=tuple(local_results),
         component_update_counts=component_update_counts,
         examples_seen=sum(result.examples_seen for result in local_results),

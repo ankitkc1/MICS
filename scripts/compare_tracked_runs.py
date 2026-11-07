@@ -143,16 +143,44 @@ def _selection_summary(
     ]
     communication = metrics[-1]["communication"]
     examples_seen = sum(int(record["examples_seen"]) for record in metrics)
-    weighted_loss = sum(
-        float(record["sample_weighted_training_loss"])
-        * int(record["examples_seen"])
+    weighted_loss = (
+        sum(
+            float(record["sample_weighted_training_loss"])
+            * int(record["examples_seen"])
+            for record in metrics
+            if record["sample_weighted_training_loss"] is not None
+        )
+        / examples_seen
+        if examples_seen > 0
+        else None
+    )
+    selected_count = sum(len(record["selected_clients"]) for record in metrics)
+    successful_count = sum(
+        len(record.get("successful_clients", record["selected_clients"]))
         for record in metrics
-    ) / examples_seen
+    )
     return {
         "round_count": len(metrics),
         "selected_clients_by_round": [
             list(record["selected_clients"]) for record in metrics
         ],
+        "successful_clients_by_round": [
+            list(record.get("successful_clients", record["selected_clients"]))
+            for record in metrics
+        ],
+        "failed_selected_clients_by_round": [
+            list(record.get("failed_selected_clients", []))
+            for record in metrics
+        ],
+        "available_client_count_by_round": [
+            len(record.get("available_clients", []))
+            if "available_clients" in record
+            else int(record["selection_diagnostics"]["eligible_client_count"])
+            for record in metrics
+        ],
+        "selected_attempt_count": selected_count,
+        "successful_completion_count": successful_count,
+        "selected_completion_rate": successful_count / selected_count,
         "selection_counts": dict(
             final_diagnostics["selection_counts_after_round"]
         ),
@@ -285,6 +313,11 @@ def main() -> None:
             "device",
         ),
     )
+    baseline_trace = baseline_config.get("system_trace")
+    candidate_trace = candidate_config.get("system_trace")
+    if baseline_trace != candidate_trace:
+        raise ValueError("Compared runs do not use the same system trace.")
+    matched_training["system_trace"] = baseline_trace
     baseline_metrics = _jsonl(baseline_dir / "round_metrics.jsonl")
     candidate_metrics = _jsonl(candidate_dir / "round_metrics.jsonl")
     if len(baseline_metrics) != len(candidate_metrics):

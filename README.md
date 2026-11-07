@@ -33,6 +33,8 @@ Implemented and tested:
 - exact small-silo component-service target calibration;
 - checkpointable MICS-Core/Impact component queues and cardinality greedy;
 - a shared tracked FL runner for uniform and MICS selector comparisons;
+- immutable matched availability/completion-potential traces for controlled
+  system-heterogeneity experiments;
 - immutable run metadata, selector-state checkpoints, and resume support;
 - guarded paired-run audits for selection, service, communication, and metrics;
 - CPU tests and an HPC GPU smoke-job template.

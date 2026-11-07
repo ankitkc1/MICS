@@ -22,7 +22,9 @@ from mics.data import (
 from mics.experiments import (
     FederatedTrainingLoopConfig,
     RunRecorder,
+    SystemTrace,
     collect_runtime_metadata,
+    load_system_trace,
     run_tracked_federated_training,
 )
 from mics.selection import UniformRandomSelector
@@ -37,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("MICS_DATA_ROOT"),
     )
     parser.add_argument("--scenario-config", required=True, type=Path)
+    parser.add_argument("--system-trace", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path("results"))
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--rounds", type=int, default=150)
@@ -91,6 +94,7 @@ def _scenario_files(scenario: BraTSScenario) -> tuple[Path, ...]:
 def _resolved_config(
     arguments: argparse.Namespace,
     scenario: BraTSScenario,
+    system_trace: SystemTrace | None,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -156,6 +160,9 @@ def _resolved_config(
             "data": arguments.data_seed,
         },
         "device": arguments.device,
+        "system_trace": (
+            None if system_trace is None else system_trace.source_record()
+        ),
     }
 
 
@@ -185,6 +192,11 @@ def main() -> None:
     )
     if arguments.clients_per_round > len(scenario.clients):
         raise SystemExit("Client budget exceeds the scenario client count.")
+    system_trace = (
+        None
+        if arguments.system_trace is None
+        else load_system_trace(arguments.system_trace)
+    )
 
     torch.manual_seed(arguments.model_seed)
     if torch.cuda.is_available():
@@ -193,7 +205,7 @@ def main() -> None:
     torch.backends.cudnn.deterministic = True
 
     project_root = Path(__file__).resolve().parents[1]
-    config = _resolved_config(arguments, scenario)
+    config = _resolved_config(arguments, scenario, system_trace)
     model = MultiEncoderUNet3D(
         modalities=OrderedDict((name, 1) for name in BRATS_MODALITIES),
         num_classes=4,
@@ -239,6 +251,7 @@ def main() -> None:
         selector,
         settings,
         loop,
+        system_trace=system_trace,
         resume=arguments.resume,
     )
 

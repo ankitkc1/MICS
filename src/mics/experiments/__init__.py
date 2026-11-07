@@ -15,6 +15,12 @@ from .importance_record import (
     LoadedModalityImportance,
     load_modality_importance_record,
 )
+from .system_trace import (
+    SystemTrace,
+    SystemTraceRound,
+    generate_system_trace,
+    load_system_trace,
+)
 from .metrics import (
     component_state_nbytes,
     jain_fairness_index,
@@ -32,6 +38,8 @@ __all__ = [
     "RunRecorder",
     "LoadedFederatedCheckpoint",
     "LoadedModalityImportance",
+    "SystemTrace",
+    "SystemTraceRound",
     "FederatedTrainingLoopConfig",
     "atomic_write_json",
     "collect_runtime_metadata",
@@ -39,8 +47,10 @@ __all__ = [
     "build_model_from_resolved_config",
     "component_state_nbytes",
     "jain_fairness_index",
+    "generate_system_trace",
     "load_federated_checkpoint",
     "load_modality_importance_record",
+    "load_system_trace",
     "read_json_object",
     "run_tracked_federated_training",
     "selection_round_diagnostics",

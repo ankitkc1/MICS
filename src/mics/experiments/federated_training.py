@@ -32,6 +32,7 @@ from .metrics import (
     validate_selection_plan,
 )
 from .tracking import RunRecorder
+from .system_trace import SystemTrace
 
 
 @dataclass(frozen=True)
@@ -197,12 +198,21 @@ def run_tracked_federated_training(
     loop: FederatedTrainingLoopConfig,
     *,
     component_importance: Mapping[str, float] | None = None,
+    system_trace: SystemTrace | None = None,
     resume: bool = False,
 ) -> None:
     """Run selector-controlled FL with identical policy-neutral mechanics."""
 
     if loop.clients_per_round > len(scenario.clients):
         raise ValueError("Client budget exceeds the scenario client count.")
+    scenario_client_ids = tuple(client.client_id for client in scenario.clients)
+    if system_trace is not None:
+        if system_trace.clients != scenario_client_ids:
+            raise ValueError("System-trace clients do not match the scenario.")
+        if len(system_trace.rounds) < loop.rounds:
+            raise ValueError("System trace is shorter than the training run.")
+        if system_trace.minimum_available_clients < loop.clients_per_round:
+            raise ValueError("System trace cannot satisfy the selection budget.")
     importance = dict(component_importance or {})
     (
         start_round,
@@ -223,6 +233,14 @@ def run_tracked_federated_training(
     try:
         for round_index in range(start_round, loop.rounds):
             current_round = round_index
+            trace_round = (
+                None if system_trace is None else system_trace.round(round_index)
+            )
+            available_clients = (
+                set(scenario_client_ids)
+                if trace_round is None
+                else set(trace_round.available_clients)
+            )
             context = SelectionContext(
                 round_index=round_index,
                 budget=loop.clients_per_round,
@@ -231,6 +249,7 @@ def run_tracked_federated_training(
                         client_id=client.client_id,
                         modalities=frozenset(client.modalities),
                         num_samples=len(client.train_case_ids),
+                        available=client.client_id in available_clients,
                         last_selected_round=last_selected_round[client.client_id],
                     )
                     for client in scenario.clients
@@ -269,14 +288,17 @@ def run_tracked_federated_training(
             }
             specs = []
             client_download_bytes: dict[str, int] = {}
+            successful_client_ids = (
+                plan.selected_client_ids
+                if system_trace is None
+                else system_trace.successful_selected_clients(
+                    round_index,
+                    plan.selected_client_ids,
+                )
+            )
+            successful_client_set = set(successful_client_ids)
             for client_id in plan.selected_client_ids:
                 client = scenario.client(client_id)
-                loader = _build_loader(
-                    scenario,
-                    client_id,
-                    loop=loop,
-                    round_index=round_index,
-                )
                 components = (
                     *(f"encoder:{modality}" for modality in client.modalities),
                     "fusion",
@@ -285,6 +307,14 @@ def run_tracked_federated_training(
                 )
                 client_download_bytes[client_id] = sum(
                     component_bytes[component] for component in components
+                )
+                if client_id not in successful_client_set:
+                    continue
+                loader = _build_loader(
+                    scenario,
+                    client_id,
+                    loop=loop,
+                    round_index=round_index,
                 )
                 specs.append(
                     ClientRoundSpec(
@@ -301,10 +331,10 @@ def run_tracked_federated_training(
                 round_index=round_index,
                 device=loop.device,
                 training_config=training,
+                attempted_client_ids=plan.selected_client_ids,
             )
-            successful_client_ids = tuple(
-                local.client_id for local in result.local_results
-            )
+            if result.successful_client_ids != successful_client_ids:
+                raise RuntimeError("Federated result changed trace completion order.")
             selector_outcome = selector.observe_round(
                 round_index,
                 selected_client_ids=plan.selected_client_ids,
@@ -339,6 +369,7 @@ def run_tracked_federated_training(
                 result,
                 diagnostics,
                 selector_outcome=dict(selector_outcome),
+                available_client_ids=tuple(sorted(available_clients)),
                 round_index=round_index,
                 selection_seconds=selection_seconds,
                 weighted_loss_numerator=weighted_loss_numerator,
@@ -386,6 +417,7 @@ def _round_record(
     diagnostics: dict[str, Any],
     *,
     selector_outcome: dict[str, Any],
+    available_client_ids: tuple[str, ...],
     round_index: int,
     selection_seconds: float,
     weighted_loss_numerator: float,
@@ -399,11 +431,20 @@ def _round_record(
     return {
         "round": round_index,
         "selected_clients": list(result.selected_client_ids),
+        "successful_clients": list(result.successful_client_ids),
+        "failed_selected_clients": sorted(
+            set(result.selected_client_ids).difference(
+                result.successful_client_ids
+            )
+        ),
+        "available_clients": list(available_client_ids),
         "selection_seconds": selection_seconds,
         "training_seconds": result.elapsed_seconds,
         "examples_seen": result.examples_seen,
         "sample_weighted_training_loss": (
             weighted_loss_numerator / result.examples_seen
+            if result.examples_seen > 0
+            else None
         ),
         "component_update_counts": dict(result.component_update_counts),
         "selection_diagnostics": diagnostics,

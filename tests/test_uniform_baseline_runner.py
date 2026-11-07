@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+from mics.experiments import generate_system_trace
+
 
 class UniformBaselineRunnerTests(unittest.TestCase):
     def test_one_cpu_round_writes_completed_checkpointed_run(self) -> None:
@@ -475,6 +477,94 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                     ["evaluation_cases_and_masks"]
                 ),
                 2,
+            )
+
+            trace = None
+            for trace_seed in range(100):
+                candidate_trace = generate_system_trace(
+                    ("C1", "C2"),
+                    rounds=1,
+                    seed=trace_seed,
+                    availability_probabilities={"C1": 1.0, "C2": 1.0},
+                    completion_probabilities={"C1": 0.5, "C2": 0.5},
+                    minimum_available_clients=1,
+                    trace_id="all-failed-integration-fixture",
+                )
+                if not any(
+                    candidate_trace.round(0).completion_potential.values()
+                ):
+                    trace = candidate_trace
+                    break
+            self.assertIsNotNone(trace)
+            trace_path = root / "system_trace.json"
+            trace_path.write_text(
+                json.dumps(trace.as_dict()),
+                encoding="utf-8",
+            )
+            failed_run = subprocess.run(
+                (
+                    sys.executable,
+                    str(project_root / "scripts" / "run_mics_training.py"),
+                    "--dataset-root",
+                    str(dataset_root),
+                    "--scenario-config",
+                    str(scenario_config),
+                    "--system-trace",
+                    str(trace_path),
+                    "--importance-output",
+                    str(importance_path),
+                    "--output-root",
+                    str(output_root),
+                    "--run-id",
+                    "mics-failed-client-smoke",
+                    "--rounds",
+                    "1",
+                    "--clients-per-round",
+                    "1",
+                    "--base-channels",
+                    "2",
+                    "--num-levels",
+                    "2",
+                    "--modality-dropout",
+                    "0",
+                    "--patch-size",
+                    "4",
+                    "4",
+                    "4",
+                    "--max-batches-per-epoch",
+                    "1",
+                    "--reliability-aware",
+                    "--device",
+                    "cpu",
+                    "--no-amp",
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if failed_run.returncode != 0:
+                self.fail(
+                    "Failed-client MICS subprocess failed:\n"
+                    f"stdout:\n{failed_run.stdout}\n"
+                    f"stderr:\n{failed_run.stderr}"
+                )
+            failed_metrics = json.loads(
+                (
+                    output_root
+                    / "mics-failed-client-smoke"
+                    / "round_metrics.jsonl"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(failed_metrics["examples_seen"], 0)
+            self.assertEqual(len(failed_metrics["failed_selected_clients"]), 1)
+            self.assertTrue(
+                all(
+                    value > 0.0
+                    for value in failed_metrics["selector_outcome"]
+                    ["component_queues_after_round"].values()
+                )
             )
 
 

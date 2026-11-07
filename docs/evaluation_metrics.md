@@ -24,11 +24,23 @@ corresponding segmentation outcomes rather than classification accuracy.
 - time to the preregistered target under controlled system conditions;
 - cumulative uploaded and downloaded parameter bytes;
 - communication rounds to target;
-- successful, failed, and unavailable selected clients.
+- available-client count per round;
+- selected attempts, successful completions, and failed selected clients;
+- selected-client completion rate overall and by client.
 
 Raw HPC timing is reported as an implementation measurement, not as a general
 systems claim. Comparisons under system heterogeneity require identical,
-controlled client-latency and availability traces.
+controlled availability and completion traces. Latency-based claims
+additionally require a matched latency trace, which is not part of the current
+completion-heterogeneity smoke test.
+
+System events are represented as selection-independent potential outcomes:
+every client has a predetermined completion outcome in every round, including
+when it is not selected. This preserves paired comparability when two methods
+choose different subsets. A failed selected client incurs its model download
+but contributes no upload, local examples, component update, or realised
+component service. Queue backlogs are updated from completed clients rather
+than attempted selections.
 
 Communication is counted from the exact tensor sizes of the modality encoders
 and shared components logically transferred by the federated protocol. It is
@@ -113,8 +125,10 @@ reconstruction, never by averaging training-patch scores.
 
 All methods use identical model initialization, client splits, modality
 manifest, training batches, evaluation cases, selected-client budget, and
-matched seeds. Target thresholds are fixed before comparing methods. Test data
-never supplies client utility or modality importance to a selector.
+matched seeds. Under system heterogeneity they additionally use the same
+checksummed availability/completion trace. Target thresholds are fixed before
+comparing methods. Test data never supplies client utility or modality
+importance to a selector.
 
 The paired-run audit rejects comparisons when the scenario checksums, client
 partitions, model, training configuration, model/data seeds, client budget, or
