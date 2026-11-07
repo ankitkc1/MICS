@@ -116,6 +116,12 @@ manifest, training batches, evaluation cases, selected-client budget, and
 matched seeds. Target thresholds are fixed before comparing methods. Test data
 never supplies client utility or modality importance to a selector.
 
+The paired-run audit rejects comparisons when the scenario checksums, client
+partitions, model, training configuration, model/data seeds, client budget, or
+whole-volume evaluation cases and modality masks differ. Smoke-run differences
+are recorded for pipeline verification only and are explicitly marked as
+ineligible for model-quality or selector-superiority claims.
+
 Primary references:
 
 - Oort: https://www.usenix.org/conference/osdi21/presentation/lai

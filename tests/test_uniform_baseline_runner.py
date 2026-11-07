@@ -330,7 +330,7 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                     "--rounds",
                     "1",
                     "--clients-per-round",
-                    "2",
+                    "1",
                     "--checkpoint-every",
                     "1",
                     "--base-channels",
@@ -385,6 +385,97 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                 mics_metrics["selector_outcome"],
             )
             self.assertTrue((mics_run / "checkpoints" / "last.pt").is_file())
+
+            mics_evaluation = subprocess.run(
+                (
+                    sys.executable,
+                    str(
+                        project_root
+                        / "scripts"
+                        / "evaluate_brats_checkpoint.py"
+                    ),
+                    "--run-dir",
+                    str(mics_run),
+                    "--dataset-root",
+                    str(dataset_root),
+                    "--scenario-config",
+                    str(scenario_config),
+                    "--partition",
+                    "validation",
+                    "--max-cases-per-client",
+                    "1",
+                    "--roi-size",
+                    "4",
+                    "4",
+                    "4",
+                    "--device",
+                    "cpu",
+                    "--no-amp",
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if mics_evaluation.returncode != 0:
+                self.fail(
+                    "MICS evaluation subprocess failed:\n"
+                    f"stdout:\n{mics_evaluation.stdout}\n"
+                    f"stderr:\n{mics_evaluation.stderr}"
+                )
+            mics_evaluation_path = (
+                mics_run
+                / "evaluations"
+                / "validation_subset_after_round_0001.json"
+            )
+            comparison_path = root / "paired_comparison.json"
+            comparison = subprocess.run(
+                (
+                    sys.executable,
+                    str(project_root / "scripts" / "compare_tracked_runs.py"),
+                    "--baseline-run-dir",
+                    str(run_dir),
+                    "--candidate-run-dir",
+                    str(mics_run),
+                    "--baseline-evaluation",
+                    str(evaluation_path),
+                    "--candidate-evaluation",
+                    str(mics_evaluation_path),
+                    "--output",
+                    str(comparison_path),
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if comparison.returncode != 0:
+                self.fail(
+                    "Paired comparison subprocess failed:\n"
+                    f"stdout:\n{comparison.stdout}\n"
+                    f"stderr:\n{comparison.stderr}"
+                )
+            comparison_payload = json.loads(
+                comparison_path.read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "MICS PAIRED TRACKED-RUN COMPARISON PASSED",
+                comparison.stdout,
+            )
+            self.assertEqual(
+                comparison_payload["purpose"],
+                "paired_integration_audit_not_model_quality",
+            )
+            self.assertFalse(comparison_payload["interpretation_allowed"])
+            self.assertEqual(
+                len(
+                    comparison_payload["paired_invariants"]
+                    ["evaluation_cases_and_masks"]
+                ),
+                2,
+            )
 
 
 if __name__ == "__main__":

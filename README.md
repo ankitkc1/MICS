@@ -34,6 +34,7 @@ Implemented and tested:
 - checkpointable MICS-Core/Impact component queues and cardinality greedy;
 - a shared tracked FL runner for uniform and MICS selector comparisons;
 - immutable run metadata, selector-state checkpoints, and resume support;
+- guarded paired-run audits for selection, service, communication, and metrics;
 - CPU tests and an HPC GPU smoke-job template.
 
 Planned but not yet claimed as experimental evidence:
