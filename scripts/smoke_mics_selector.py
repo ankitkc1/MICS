@@ -9,13 +9,13 @@ import math
 import os
 import time
 from pathlib import Path
-from typing import Any
 
 from mics import ClientState, MICSSelector, SelectionContext
 from mics.data import BRATS_MODALITIES, load_brats_scenario
 from mics.experiments import (
     atomic_write_json,
     jain_fairness_index,
+    load_modality_importance_record,
     selection_round_diagnostics,
     validate_selection_plan,
 )
@@ -40,34 +40,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _json_object(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise FileNotFoundError(f"JSON input does not exist: {path}")
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"Expected a JSON object in {path}.")
-    return value
-
-
-def _importance_weights(payload: dict[str, Any]) -> dict[str, float]:
-    importance = payload.get("importance")
-    if not isinstance(importance, dict):
-        raise ValueError("Importance record has no importance object.")
-    if importance.get("test_data_accessed") is not False:
-        raise ValueError("Importance record does not certify validation-only use.")
-    raw = importance.get("normalised_selection_weights")
-    if not isinstance(raw, dict):
-        raise ValueError("Importance record has no normalized selection weights.")
-    weights = {str(key): float(value) for key, value in raw.items()}
-    if set(weights) != set(BRATS_MODALITIES):
-        raise ValueError("Importance weights do not match the BraTS modalities.")
-    if any(not math.isfinite(value) or value < 0.0 for value in weights.values()):
-        raise ValueError("Importance weights must be finite and non-negative.")
-    if not math.isclose(sum(weights.values()), 1.0, rel_tol=1e-7, abs_tol=1e-9):
-        raise ValueError("Importance weights must sum to one.")
-    return {modality: weights[modality] for modality in BRATS_MODALITIES}
-
-
 def main() -> None:
     arguments = build_parser().parse_args()
     if arguments.dataset_root is None:
@@ -86,8 +58,12 @@ def main() -> None:
     )
     if arguments.clients_per_round > len(scenario.clients):
         raise SystemExit("Client budget exceeds the scenario client count.")
-    importance_payload = _json_object(arguments.importance_output.resolve())
-    importance_weights = _importance_weights(importance_payload)
+    loaded_importance = load_modality_importance_record(
+        arguments.importance_output,
+        modalities=BRATS_MODALITIES,
+    )
+    importance_payload = loaded_importance.payload
+    importance_weights = loaded_importance.weights
     manifests = {
         client.client_id: client.modalities for client in scenario.clients
     }

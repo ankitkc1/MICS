@@ -313,6 +313,79 @@ class UniformBaselineRunnerTests(unittest.TestCase):
             )
             self.assertEqual(len(selector_payload["rounds"]), 3)
 
+            mics_training = subprocess.run(
+                (
+                    sys.executable,
+                    str(project_root / "scripts" / "run_mics_training.py"),
+                    "--dataset-root",
+                    str(dataset_root),
+                    "--scenario-config",
+                    str(scenario_config),
+                    "--importance-output",
+                    str(importance_path),
+                    "--output-root",
+                    str(output_root),
+                    "--run-id",
+                    "mics-cpu-smoke",
+                    "--rounds",
+                    "1",
+                    "--clients-per-round",
+                    "2",
+                    "--checkpoint-every",
+                    "1",
+                    "--base-channels",
+                    "2",
+                    "--num-levels",
+                    "2",
+                    "--modality-dropout",
+                    "0",
+                    "--patch-size",
+                    "4",
+                    "4",
+                    "4",
+                    "--max-batches-per-epoch",
+                    "1",
+                    "--device",
+                    "cpu",
+                    "--no-amp",
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if mics_training.returncode != 0:
+                self.fail(
+                    "MICS training subprocess failed:\n"
+                    f"stdout:\n{mics_training.stdout}\n"
+                    f"stderr:\n{mics_training.stderr}"
+                )
+            mics_run = output_root / "mics-cpu-smoke"
+            mics_status = json.loads(
+                (mics_run / "status.json").read_text(encoding="utf-8")
+            )
+            mics_config = json.loads(
+                (mics_run / "resolved_config.json").read_text(encoding="utf-8")
+            )
+            mics_metrics = json.loads(
+                (mics_run / "round_metrics.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
+            )
+            self.assertIn(
+                "MICS TRACKED FEDERATED TRAINING PASSED",
+                mics_training.stdout,
+            )
+            self.assertEqual(mics_status["state"], "completed")
+            self.assertEqual(mics_config["method"], "mics_impact")
+            self.assertEqual(mics_metrics["round"], 0)
+            self.assertIn(
+                "component_queues_after_round",
+                mics_metrics["selector_outcome"],
+            )
+            self.assertTrue((mics_run / "checkpoints" / "last.pt").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

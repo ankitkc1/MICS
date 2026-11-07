@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -90,6 +91,18 @@ class ClientSelector(ABC):
     def state_dict(self) -> Mapping[str, Any]:
         """Return resumable selector state."""
 
+        return {}
+
+    def observe_round(
+        self,
+        round_index: int,
+        *,
+        selected_client_ids: Iterable[str],
+        successful_client_ids: Iterable[str],
+    ) -> Mapping[str, Any]:
+        """Consume realised participation outcomes after a planned round."""
+
+        del round_index, selected_client_ids, successful_client_ids
         return {}
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:

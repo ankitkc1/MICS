@@ -55,7 +55,8 @@ service protection.
 
 - implemented: pure and truncated-linear service, exact static calibration,
   component and optional client queues, completion-aware expectations,
-  MICS-Core/Impact cardinality greedy, full state checkpointing;
+  MICS-Core/Impact cardinality greedy, full state checkpointing, and the
+  shared tracked federated training loop used by the uniform baseline;
 - not yet implemented: cached-update facility location, the knapsack-specific
   partial-enumeration oracle, stochastic availability generation, or IPW
   learning correction;

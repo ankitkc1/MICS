@@ -32,13 +32,14 @@ Implemented and tested:
 - validation-only paired leave-one-modality-out importance estimation;
 - exact small-silo component-service target calibration;
 - checkpointable MICS-Core/Impact component queues and cardinality greedy;
+- a shared tracked FL runner for uniform and MICS selector comparisons;
+- immutable run metadata, selector-state checkpoints, and resume support;
 - CPU tests and an HPC GPU smoke-job template.
 
 Planned but not yet claimed as experimental evidence:
 
 - cached-update MICS-Diversity and knapsack-oracle extensions;
 - PoC, DivFL, Oort, and modality-aware comparison methods;
-- integration of MICS selection into the tracked training runner;
 - complete multi-seed journal experiments.
 
 ## Model architecture

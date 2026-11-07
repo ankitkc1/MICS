@@ -7,32 +7,23 @@ import argparse
 import hashlib
 import json
 import os
-import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 import torch
-from torch.utils.data import DataLoader
 
-from mics import ClientState, MultiEncoderUNet3D, SelectionContext
+from mics import MultiEncoderUNet3D
 from mics.data import (
     BRATS_MODALITIES,
     BraTSScenario,
-    build_brats_scenario_dataset,
     load_brats_scenario,
 )
 from mics.experiments import (
+    FederatedTrainingLoopConfig,
     RunRecorder,
     collect_runtime_metadata,
-    component_state_nbytes,
-    selection_round_diagnostics,
-    validate_selection_plan,
-)
-from mics.federated import (
-    ClientRoundSpec,
-    FederatedRoundResult,
-    run_federated_round,
+    run_tracked_federated_training,
 )
 from mics.selection import UniformRandomSelector
 from mics.training import LocalTrainingConfig
@@ -95,11 +86,6 @@ def _scenario_files(scenario: BraTSScenario) -> tuple[Path, ...]:
             (client.train_file, client.validation_file, client.test_file)
         )
     return tuple(files)
-
-
-def _stable_seed(base_seed: int, round_index: int, client_id: str) -> int:
-    material = f"{base_seed}:{round_index}:{client_id}".encode("utf-8")
-    return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") % (2**63)
 
 
 def _resolved_config(
@@ -173,65 +159,6 @@ def _resolved_config(
     }
 
 
-def _build_loader(
-    dataset_root: Path,
-    scenario: BraTSScenario,
-    client_id: str,
-    *,
-    arguments: argparse.Namespace,
-    round_index: int,
-) -> DataLoader:
-    seed = _stable_seed(arguments.data_seed, round_index, client_id)
-    dataset = build_brats_scenario_dataset(
-        dataset_root,
-        scenario,
-        client_id,
-        partition="train",
-        patch_size=tuple(arguments.patch_size),
-        foreground_probability=arguments.foreground_probability,
-        seed=seed,
-    )
-    generator = torch.Generator().manual_seed(seed)
-    return DataLoader(
-        dataset,
-        batch_size=arguments.batch_size,
-        shuffle=True,
-        num_workers=arguments.num_workers,
-        pin_memory=str(arguments.device).startswith("cuda"),
-        generator=generator,
-    )
-
-
-def _checkpoint(
-    model: MultiEncoderUNet3D,
-    selector: UniformRandomSelector,
-    *,
-    recorder: RunRecorder,
-    next_round: int,
-    selection_counts: dict[str, int],
-    last_selected_round: dict[str, int | None],
-    modality_last_updated_round: dict[str, int | None],
-    cumulative_download_bytes: int,
-    cumulative_upload_bytes: int,
-) -> dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "config_fingerprint": recorder.config_fingerprint,
-        "next_round": next_round,
-        "global_components": model.component_state_dict(clone=True),
-        "selector_state": dict(selector.state_dict()),
-        "selection_counts": selection_counts,
-        "last_selected_round": last_selected_round,
-        "modality_last_updated_round": modality_last_updated_round,
-        "cumulative_download_bytes": cumulative_download_bytes,
-        "cumulative_upload_bytes": cumulative_upload_bytes,
-        "torch_rng_state": torch.get_rng_state(),
-        "cuda_rng_state_all": (
-            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []
-        ),
-    }
-
-
 def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
     if arguments.dataset_root is None:
         raise SystemExit("Set MICS_DATA_ROOT or pass --dataset-root.")
@@ -293,47 +220,26 @@ def main() -> None:
         runtime_metadata=collect_runtime_metadata(project_root),
         resume=arguments.resume,
     )
-    selection_counts = {client.client_id: 0 for client in scenario.clients}
-    last_selected_round: dict[str, int | None] = {
-        client.client_id: None for client in scenario.clients
-    }
-    modality_last_updated_round: dict[str, int | None] = {
-        modality: None for modality in BRATS_MODALITIES
-    }
-    cumulative_download_bytes = 0
-    cumulative_upload_bytes = 0
-    start_round = 0
-
-    if arguments.resume:
-        checkpoint = recorder.load_checkpoint()
-        model.load_component_state_dict(checkpoint["global_components"])
-        selector.load_state_dict(checkpoint["selector_state"])
-        selection_counts = dict(checkpoint["selection_counts"])
-        last_selected_round = dict(checkpoint["last_selected_round"])
-        modality_last_updated_round = dict(
-            checkpoint["modality_last_updated_round"]
-        )
-        cumulative_download_bytes = int(checkpoint["cumulative_download_bytes"])
-        cumulative_upload_bytes = int(checkpoint["cumulative_upload_bytes"])
-        torch.set_rng_state(checkpoint["torch_rng_state"])
-        if torch.cuda.is_available() and checkpoint["cuda_rng_state_all"]:
-            torch.cuda.set_rng_state_all(checkpoint["cuda_rng_state_all"])
-        start_round = int(checkpoint["next_round"])
-
-    _run_rounds(
-        arguments,
+    loop = FederatedTrainingLoopConfig(
+        dataset_root=arguments.dataset_root,
+        rounds=arguments.rounds,
+        clients_per_round=arguments.clients_per_round,
+        checkpoint_every=arguments.checkpoint_every,
+        patch_size=tuple(arguments.patch_size),
+        foreground_probability=arguments.foreground_probability,
+        batch_size=arguments.batch_size,
+        num_workers=arguments.num_workers,
+        data_seed=arguments.data_seed,
+        device=target_device,
+    )
+    run_tracked_federated_training(
         scenario,
         recorder,
         model,
         selector,
         settings,
-        target_device=target_device,
-        start_round=start_round,
-        selection_counts=selection_counts,
-        last_selected_round=last_selected_round,
-        modality_last_updated_round=modality_last_updated_round,
-        cumulative_download_bytes=cumulative_download_bytes,
-        cumulative_upload_bytes=cumulative_upload_bytes,
+        loop,
+        resume=arguments.resume,
     )
 
     print(f"Run directory: {recorder.run_dir}")
@@ -343,236 +249,6 @@ def main() -> None:
             "and must not be reported as model quality."
         )
     print("MICS UNIFORM-RANDOM BASELINE TRAINING PASSED")
-
-
-def _run_rounds(
-    arguments: argparse.Namespace,
-    scenario: BraTSScenario,
-    recorder: RunRecorder,
-    model: MultiEncoderUNet3D,
-    selector: UniformRandomSelector,
-    settings: LocalTrainingConfig,
-    *,
-    target_device: torch.device,
-    start_round: int,
-    selection_counts: dict[str, int],
-    last_selected_round: dict[str, int | None],
-    modality_last_updated_round: dict[str, int | None],
-    cumulative_download_bytes: int,
-    cumulative_upload_bytes: int,
-) -> None:
-    current_round = start_round
-    recorder.mark_running(next_round=start_round)
-    try:
-        for round_index in range(start_round, arguments.rounds):
-            current_round = round_index
-            context = SelectionContext(
-                round_index=round_index,
-                budget=arguments.clients_per_round,
-                clients=tuple(
-                    ClientState(
-                        client_id=client.client_id,
-                        modalities=frozenset(client.modalities),
-                        num_samples=len(client.train_case_ids),
-                        last_selected_round=last_selected_round[client.client_id],
-                    )
-                    for client in scenario.clients
-                ),
-                metadata={"scenario_id": scenario.scenario_id},
-            )
-            selection_started = time.perf_counter()
-            plan = selector.plan_round(context)
-            selection_seconds = time.perf_counter() - selection_started
-            validate_selection_plan(context, plan)
-            diagnostics = selection_round_diagnostics(
-                context,
-                plan,
-                selection_counts=selection_counts,
-                modality_last_updated_round=modality_last_updated_round,
-            )
-            recorder.record_selection(
-                {
-                    "round": round_index,
-                    "selected_clients": list(plan.selected_client_ids),
-                    "scores": dict(plan.scores),
-                    "selector_metadata": dict(plan.metadata),
-                    "selection_seconds": selection_seconds,
-                    "eligible_clients": [
-                        client.client_id for client in context.eligible_clients
-                    ],
-                    "diagnostics_before_training": diagnostics,
-                }
-            )
-
-            component_states = model.component_state_dict(clone=False)
-            component_bytes = {
-                name: component_state_nbytes(state)
-                for name, state in component_states.items()
-            }
-            specs = []
-            client_download_bytes: dict[str, int] = {}
-            for client_id in plan.selected_client_ids:
-                client = scenario.client(client_id)
-                loader = _build_loader(
-                    arguments.dataset_root,
-                    scenario,
-                    client_id,
-                    arguments=arguments,
-                    round_index=round_index,
-                )
-                components = (
-                    *(f"encoder:{modality}" for modality in client.modalities),
-                    "fusion",
-                    "decoder",
-                    "head",
-                )
-                client_download_bytes[client_id] = sum(
-                    component_bytes[component] for component in components
-                )
-                specs.append(
-                    ClientRoundSpec(
-                        client_id=client_id,
-                        modalities=client.modalities,
-                        batches=loader,
-                        aggregation_weight=float(len(client.train_case_ids)),
-                    )
-                )
-
-            result = run_federated_round(
-                model,
-                specs,
-                round_index=round_index,
-                device=target_device,
-                training_config=settings,
-            )
-            upload_by_client = {
-                local.client_id: sum(
-                    component_state_nbytes(state)
-                    for state in local.update.states.values()
-                )
-                for local in result.local_results
-            }
-            round_download_bytes = sum(client_download_bytes.values())
-            round_upload_bytes = sum(upload_by_client.values())
-            cumulative_download_bytes += round_download_bytes
-            cumulative_upload_bytes += round_upload_bytes
-
-            for client_id in plan.selected_client_ids:
-                selection_counts[client_id] += 1
-                last_selected_round[client_id] = round_index
-            for modality, count in diagnostics[
-                "selected_clients_per_modality"
-            ].items():
-                if count > 0:
-                    modality_last_updated_round[modality] = round_index
-
-            weighted_loss_numerator = sum(
-                local.mean_loss * local.examples_seen
-                for local in result.local_results
-            )
-            round_record = _round_record(
-                scenario,
-                result,
-                diagnostics,
-                round_index=round_index,
-                selection_seconds=selection_seconds,
-                weighted_loss_numerator=weighted_loss_numerator,
-                round_download_bytes=round_download_bytes,
-                round_upload_bytes=round_upload_bytes,
-                cumulative_download_bytes=cumulative_download_bytes,
-                cumulative_upload_bytes=cumulative_upload_bytes,
-                client_download_bytes=client_download_bytes,
-                upload_by_client=upload_by_client,
-            )
-            recorder.record_round(round_record)
-            completed_rounds = round_index + 1
-            archive_round = (
-                completed_rounds
-                if completed_rounds % arguments.checkpoint_every == 0
-                or completed_rounds == arguments.rounds
-                else None
-            )
-            recorder.save_checkpoint(
-                _checkpoint(
-                    model,
-                    selector,
-                    recorder=recorder,
-                    next_round=completed_rounds,
-                    selection_counts=selection_counts,
-                    last_selected_round=last_selected_round,
-                    modality_last_updated_round=modality_last_updated_round,
-                    cumulative_download_bytes=cumulative_download_bytes,
-                    cumulative_upload_bytes=cumulative_upload_bytes,
-                ),
-                archive_completed_rounds=archive_round,
-            )
-            recorder.mark_round_complete(next_round=round_index + 1)
-            print(json.dumps(round_record, sort_keys=True), flush=True)
-
-        recorder.mark_completed(next_round=arguments.rounds)
-    except Exception as error:
-        recorder.mark_failed(next_round=current_round, error=repr(error))
-        raise
-
-
-def _round_record(
-    scenario: BraTSScenario,
-    result: FederatedRoundResult,
-    diagnostics: dict[str, Any],
-    *,
-    round_index: int,
-    selection_seconds: float,
-    weighted_loss_numerator: float,
-    round_download_bytes: int,
-    round_upload_bytes: int,
-    cumulative_download_bytes: int,
-    cumulative_upload_bytes: int,
-    client_download_bytes: dict[str, int],
-    upload_by_client: dict[str, int],
-) -> dict[str, Any]:
-    return {
-        "round": round_index,
-        "selected_clients": list(result.selected_client_ids),
-        "selection_seconds": selection_seconds,
-        "training_seconds": result.elapsed_seconds,
-        "examples_seen": result.examples_seen,
-        "sample_weighted_training_loss": (
-            weighted_loss_numerator / result.examples_seen
-        ),
-        "component_update_counts": dict(result.component_update_counts),
-        "selection_diagnostics": diagnostics,
-        "communication": {
-            "accounting": (
-                "logical_relevant_components_not_simulator_memory_copies"
-            ),
-            "round_download_bytes": round_download_bytes,
-            "round_upload_bytes": round_upload_bytes,
-            "cumulative_download_bytes": cumulative_download_bytes,
-            "cumulative_upload_bytes": cumulative_upload_bytes,
-            "download_bytes_by_client": client_download_bytes,
-            "upload_bytes_by_client": upload_by_client,
-        },
-        "clients": {
-            local.client_id: {
-                "modalities": list(scenario.client(local.client_id).modalities),
-                "dataset_size": len(
-                    scenario.client(local.client_id).train_case_ids
-                ),
-                "aggregation_weight": local.aggregation_weight,
-                "examples_seen": local.examples_seen,
-                "batches_processed": local.batches_processed,
-                "optimizer_steps": local.optimizer_steps,
-                "mean_loss": local.mean_loss,
-                "training_patch_dice_diagnostic": dict(local.region_dice),
-                "mean_gradient_norm_before_clipping": local.mean_gradient_norm,
-                "max_gradient_norm_before_clipping": local.max_gradient_norm,
-                "amp_overflow_retries": local.amp_overflow_retries,
-                "elapsed_seconds": local.elapsed_seconds,
-                "updated_components": list(local.update.states),
-            }
-            for local in result.local_results
-        },
-    }
 
 
 if __name__ == "__main__":
