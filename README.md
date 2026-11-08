@@ -33,6 +33,8 @@ Implemented and tested:
 - exact static and availability-conditioned small-silo service calibration;
 - checkpointable MICS-Core/Impact component queues and cardinality greedy;
 - a shared tracked FL runner for uniform and MICS selector comparisons;
+- train-loss Power-of-Choice and gradient facility-location DivFL-style
+  baselines with explicit probe-time and communication accounting;
 - immutable matched availability/completion-potential traces for controlled
   system-heterogeneity experiments;
 - immutable run metadata, selector-state checkpoints, and resume support;
@@ -42,7 +44,7 @@ Implemented and tested:
 Planned but not yet claimed as experimental evidence:
 
 - cached-update MICS-Diversity and knapsack-oracle extensions;
-- PoC, DivFL, Oort, and modality-aware comparison methods;
+- Oort and additional modality-aware comparison methods;
 - complete multi-seed journal experiments.
 
 ## Model architecture

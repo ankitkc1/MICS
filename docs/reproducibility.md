@@ -138,6 +138,12 @@ Hold constant:
 Report the extra inference, probing, and communication cost of methods that
 need losses, gradients, embeddings, or modality ablations before selection.
 Selection-only dry runs must never be presented as segmentation performance.
+For probe-based baselines, record the probed clients, train-only data scope,
+full-data or minibatch variant, examples and batches processed, probe time,
+server-side decision time, and separate probe/training traffic. Reuse of a
+model download by a subsequently selected client must be explicit. See
+`docs/reference_baselines.md` for the implemented Power-of-Choice and
+DivFL-style contracts.
 
 For leave-one-modality-out importance, record the checkpoint hash, scenario
 hash, eligible clients, native and ablated modality sets, paired case IDs,

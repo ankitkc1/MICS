@@ -27,6 +27,7 @@ from .metrics import (
     selection_round_diagnostics,
     validate_selection_plan,
 )
+from .selection_probes import SelectionProbeOutcome, run_selection_probes
 from .tracking import (
     RunRecorder,
     atomic_write_json,
@@ -36,6 +37,7 @@ from .tracking import (
 
 __all__ = [
     "RunRecorder",
+    "SelectionProbeOutcome",
     "LoadedFederatedCheckpoint",
     "LoadedModalityImportance",
     "SystemTrace",
@@ -53,6 +55,7 @@ __all__ = [
     "load_system_trace",
     "read_json_object",
     "run_tracked_federated_training",
+    "run_selection_probes",
     "selection_round_diagnostics",
     "sha256_file",
     "validate_selection_plan",

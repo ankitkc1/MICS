@@ -7,6 +7,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+SELECTION_PROBE_KINDS = ("local_loss", "gradient_vector")
+
 
 @dataclass(frozen=True)
 class ClientState:
@@ -21,14 +23,16 @@ class ClientState:
     num_samples: int
     available: bool = True
     last_selected_round: int | None = None
-    statistics: Mapping[str, float] = field(default_factory=dict)
+    statistics: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "modalities", frozenset(self.modalities))
         if not self.client_id:
             raise ValueError("client_id must be nonempty.")
         if not self.modalities:
-            raise ValueError(f"Client {self.client_id!r} must expose at least one modality.")
+            raise ValueError(
+                f"Client {self.client_id!r} must expose at least one modality."
+            )
         if self.num_samples <= 0:
             raise ValueError("num_samples must be positive.")
         if self.last_selected_round is not None and self.last_selected_round < 0:
@@ -72,7 +76,11 @@ class SelectionPlan:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "selected_client_ids", tuple(self.selected_client_ids))
+        object.__setattr__(
+            self,
+            "selected_client_ids",
+            tuple(self.selected_client_ids),
+        )
         if self.round_index < 0:
             raise ValueError("round_index cannot be negative.")
         if not self.selected_client_ids:
@@ -81,12 +89,46 @@ class SelectionPlan:
             raise ValueError("A selection plan cannot contain duplicate clients.")
 
 
+@dataclass(frozen=True)
+class SelectionProbeRequest:
+    """Selector-declared pre-selection statistics required for one round."""
+
+    round_index: int
+    client_ids: tuple[str, ...]
+    kind: str
+    max_batches: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "client_ids", tuple(self.client_ids))
+        if self.round_index < 0:
+            raise ValueError("Probe round_index cannot be negative.")
+        if not self.client_ids:
+            raise ValueError("A selection probe must contain at least one client.")
+        if len(self.client_ids) != len(set(self.client_ids)):
+            raise ValueError("Selection probe clients must be unique.")
+        if self.kind not in SELECTION_PROBE_KINDS:
+            raise ValueError(
+                f"Probe kind must be one of {SELECTION_PROBE_KINDS}."
+            )
+        if self.max_batches is not None and self.max_batches <= 0:
+            raise ValueError("Probe max_batches must be positive when provided.")
+
+
 class ClientSelector(ABC):
     """Common selector API used by training and offline selector studies."""
 
     @abstractmethod
     def plan_round(self, context: SelectionContext) -> SelectionPlan:
         """Choose clients for one communication round."""
+
+    def prepare_round(
+        self,
+        context: SelectionContext,
+    ) -> SelectionProbeRequest | None:
+        """Declare any model/data probes required before ``plan_round``."""
+
+        del context
+        return None
 
     def state_dict(self) -> Mapping[str, Any]:
         """Return resumable selector state."""

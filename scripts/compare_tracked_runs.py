@@ -209,6 +209,20 @@ def _selection_summary(
         float(value) for value in impact_coverage if value is not None
     ]
     communication = metrics[-1]["communication"]
+    probe_seconds = sum(
+        float(probe["total_seconds"])
+        for record in metrics
+        for probe in (record.get("selection_probe"),)
+        if isinstance(probe, Mapping)
+    )
+    probe_download_bytes = sum(
+        int(record["communication"].get("selection_probe_download_bytes", 0))
+        for record in metrics
+    )
+    probe_upload_bytes = sum(
+        int(record["communication"].get("selection_probe_upload_bytes", 0))
+        for record in metrics
+    )
     examples_seen = sum(int(record["examples_seen"]) for record in metrics)
     weighted_loss = (
         sum(
@@ -305,6 +319,11 @@ def _selection_summary(
         "total_selection_seconds": sum(
             float(record["selection_seconds"]) for record in metrics
         ),
+        "total_selection_probe_seconds": probe_seconds,
+        "total_selection_pipeline_seconds": (
+            probe_seconds
+            + sum(float(record["selection_seconds"]) for record in metrics)
+        ),
         "total_training_seconds": sum(
             float(record["training_seconds"]) for record in metrics
         ),
@@ -316,6 +335,8 @@ def _selection_summary(
         "cumulative_upload_bytes": int(
             communication["cumulative_upload_bytes"]
         ),
+        "cumulative_selection_probe_download_bytes": probe_download_bytes,
+        "cumulative_selection_probe_upload_bytes": probe_upload_bytes,
     }
 
 
@@ -492,6 +513,14 @@ def main() -> None:
             "candidate_minus_baseline_selection_seconds": (
                 candidate_selection["total_selection_seconds"]
                 - baseline_selection["total_selection_seconds"]
+            ),
+            "candidate_minus_baseline_selection_probe_seconds": (
+                candidate_selection["total_selection_probe_seconds"]
+                - baseline_selection["total_selection_probe_seconds"]
+            ),
+            "candidate_minus_baseline_selection_pipeline_seconds": (
+                candidate_selection["total_selection_pipeline_seconds"]
+                - baseline_selection["total_selection_pipeline_seconds"]
             ),
             "candidate_minus_baseline_download_bytes": (
                 candidate_selection["cumulative_download_bytes"]

@@ -1,6 +1,13 @@
 """Client-selection contracts and reference methods."""
 
-from .base import ClientSelector, ClientState, SelectionContext, SelectionPlan
+from .base import (
+    ClientSelector,
+    ClientState,
+    SelectionContext,
+    SelectionPlan,
+    SelectionProbeRequest,
+)
+from .baselines import DivFLSelector, PowerOfChoiceSelector
 from .mics import (
     AvailabilityAwareServiceCalibration,
     MICS_SERVICE_TYPES,
@@ -20,11 +27,14 @@ __all__ = [
     "AvailabilityAwareServiceCalibration",
     "ClientSelector",
     "ClientState",
+    "DivFLSelector",
     "MICSSelector",
     "MICS_SERVICE_TYPES",
     "PURE_COVERAGE",
+    "PowerOfChoiceSelector",
     "SelectionContext",
     "SelectionPlan",
+    "SelectionProbeRequest",
     "StaticServiceCalibration",
     "TRUNCATED_LINEAR",
     "UniformRandomSelector",

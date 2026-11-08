@@ -20,9 +20,11 @@ corresponding segmentation outcomes rather than classification accuracy.
 
 ## Efficiency and resource outcomes
 
-- wall-clock training time and selector-only overhead;
+- wall-clock local-training time, client-probe time, and server-side selector
+  decision time reported separately;
 - time to the preregistered target under controlled system conditions;
-- cumulative uploaded and downloaded parameter bytes;
+- cumulative upload and download bytes, disaggregated into selection-probe and
+  training traffic;
 - communication rounds to target;
 - available-client count per round;
 - selected attempts, successful completions, and failed selected clients;
