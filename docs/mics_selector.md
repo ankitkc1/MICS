@@ -34,17 +34,29 @@ After training, queues use realised completion outcomes:
 Predicted completion probabilities never repay debt. When reliability-aware
 selection is enabled, each client's probability is the beta-binomial posterior
 mean `(successes + a) / (attempts + a + b)` based only on earlier selections.
-The current deterministic simulator uses the reliability-free value `p=1`;
-dropout experiments must enable and evaluate the completion model explicitly.
+The tracked simulator can instead reveal outcomes from a pre-generated,
+selection-independent completion trace. Reliability-aware experiments estimate
+client probabilities only from preceding selected attempts and must report the
+estimator state and its additional assumptions.
 
 ## Service-target calibration
 
 Small static cross-silo scenarios use an exact linear program over all
-cardinality-feasible client sets. It finds the maximum common service scale in
-the declared priority direction. Operational targets multiply that boundary by
-the greedy oracle factor and a safety margin. The resulting certificate is for
-the supplied static availability and completion model; it is not a guarantee
-under an unmodelled nonstationary process.
+cardinality-feasible client sets. Under stochastic availability, the
+availability-aware program enumerates every nonzero availability state and all
+feasible client subsets in that state. State probabilities follow the declared
+independent Bernoulli model conditioned on the configured minimum available
+client count, which cannot be smaller than the selection budget. Its variables
+form a state-contingent selection mixture, and its objective finds the maximum
+common expected-service scale in the declared priority direction. It uses the
+declared distribution rather than realised future trace rounds, preventing
+look-ahead leakage.
+
+Operational targets multiply the capacity boundary by the greedy oracle factor
+and a safety margin. The certificate records the conditioning probability,
+number of availability states, number of state--action pairs, and sparse
+optimal mixture. It applies only to the supplied stationary availability and
+completion model; distribution-shift experiments require separate analysis.
 
 Equal component priorities are the default. Validation-derived modality impact
 does not alter the long-run target direction, preventing importance from being
@@ -53,12 +65,13 @@ service protection.
 
 ## Current scope
 
-- implemented: pure and truncated-linear service, exact static calibration,
-  component and optional client queues, completion-aware expectations,
-  MICS-Core/Impact cardinality greedy, full state checkpointing, and the
-  shared tracked federated training loop used by the uniform baseline;
+- implemented: pure and truncated-linear service, exact static and
+  availability-conditioned calibration, component and optional client queues,
+  completion-aware expectations, MICS-Core/Impact cardinality greedy,
+  selection-independent availability/completion traces, full state
+  checkpointing, and the shared tracked federated training loop used by the
+  uniform baseline;
 - not yet implemented: cached-update facility location, the knapsack-specific
-  partial-enumeration oracle, stochastic availability generation, or IPW
-  learning correction;
+  partial-enumeration oracle or IPW learning correction;
 - selector-only smoke results are integration evidence, not segmentation or
   convergence results.

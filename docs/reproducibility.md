@@ -59,12 +59,13 @@ only to completed clients. Report attempts, completions, failures, completion
 rate, and queue evolution separately. A trace may not be regenerated after
 observing either policy's selections or results.
 
-The current matched-trace MICS runner supports completion heterogeneity with
-all clients available. Nontrivial availability traces require state-aware
-service-target calibration and remain disabled for MICS training until that
-calibration is implemented. The trace generator already records availability
-potential outcomes so this later extension need not change the experiment
-contract.
+For nontrivial availability, MICS calibrates its fixed long-run service targets
+against the declared availability distribution. The exact small-silo LP
+enumerates all nonzero availability states and feasible actions under the same
+minimum-client conditioning rule used by the trace generator. It never uses
+the realised sequence of future trace rounds. The resolved configuration
+records the distribution, conditioning mass, state/action counts, capacity
+boundary, and optimal state-contingent mixture.
 
 ## Client scenario
 

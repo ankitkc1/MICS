@@ -30,7 +30,7 @@ Implemented and tested:
 - whole-volume Gaussian sliding-window inference and BraTS Dice/HD95 metrics;
 - a selector interface with a reproducible uniform-random baseline;
 - validation-only paired leave-one-modality-out importance estimation;
-- exact small-silo component-service target calibration;
+- exact static and availability-conditioned small-silo service calibration;
 - checkpointable MICS-Core/Impact component queues and cardinality greedy;
 - a shared tracked FL runner for uniform and MICS selector comparisons;
 - immutable matched availability/completion-potential traces for controlled

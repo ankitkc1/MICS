@@ -30,6 +30,7 @@ from mics.experiments import (
 from mics.selection import (
     MICS_SERVICE_TYPES,
     PURE_COVERAGE,
+    calibrate_availability_aware_service_targets,
     calibrate_static_service_targets,
 )
 from mics.training import LocalTrainingConfig
@@ -251,34 +252,46 @@ def main() -> None:
         if arguments.system_trace is None
         else load_system_trace(arguments.system_trace)
     )
-    if system_trace is not None and any(
-        probability < 1.0
-        for probability in system_trace.availability_probabilities.values()
-    ):
-        raise SystemExit(
-            "MICS availability traces require state-aware target calibration, "
-            "which is not enabled in this runner yet."
-        )
     importance = _load_importance(arguments)
     levels = {
         modality: arguments.saturation_level for modality in BRATS_MODALITIES
     }
-    calibration = calibrate_static_service_targets(
-        {
-            client.client_id: client.modalities for client in scenario.clients
-        },
-        budget=arguments.clients_per_round,
-        priorities={modality: 1.0 for modality in BRATS_MODALITIES},
-        service_type=arguments.service_type,
-        saturation_levels=levels,
-        completion_probabilities=(
+    manifests = {
+        client.client_id: client.modalities for client in scenario.clients
+    }
+    calibration_arguments = {
+        "budget": arguments.clients_per_round,
+        "priorities": {modality: 1.0 for modality in BRATS_MODALITIES},
+        "service_type": arguments.service_type,
+        "saturation_levels": levels,
+        "completion_probabilities": (
             None
             if system_trace is None
             else system_trace.completion_probabilities
         ),
-        oracle_factor=1.0 - 1.0 / math.e,
-        safety_margin=arguments.safety_margin,
+        "oracle_factor": 1.0 - 1.0 / math.e,
+        "safety_margin": arguments.safety_margin,
+    }
+    has_random_availability = system_trace is not None and any(
+        probability < 1.0
+        for probability in system_trace.availability_probabilities.values()
     )
+    if has_random_availability:
+        calibration = calibrate_availability_aware_service_targets(
+            manifests,
+            availability_probabilities=(
+                system_trace.availability_probabilities
+            ),
+            minimum_available_clients=(
+                system_trace.minimum_available_clients
+            ),
+            **calibration_arguments,
+        )
+    else:
+        calibration = calibrate_static_service_targets(
+            manifests,
+            **calibration_arguments,
+        )
 
     torch.manual_seed(arguments.model_seed)
     if torch.cuda.is_available():
@@ -354,7 +367,10 @@ def main() -> None:
     )
 
     print(f"Run directory: {recorder.run_dir}")
-    print(json.dumps({"calibration": calibration.as_dict()}, sort_keys=True))
+    calibration_summary = calibration.as_dict()
+    calibration_support = calibration_summary.pop("support")
+    calibration_summary["support_entry_count"] = len(calibration_support)
+    print(json.dumps({"calibration": calibration_summary}, sort_keys=True))
     if arguments.max_batches_per_epoch is not None:
         print(
             "NOTE: max_batches_per_epoch is set; this run validates integration "

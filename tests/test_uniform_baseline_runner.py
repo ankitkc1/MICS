@@ -478,6 +478,25 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                 ),
                 2,
             )
+            baseline_selection = comparison_payload["baseline"][
+                "selection_and_training"
+            ]
+            self.assertTrue(
+                all(
+                    value == 1.0
+                    for value in baseline_selection[
+                        "client_availability_rate"
+                    ].values()
+                )
+            )
+            self.assertTrue(
+                all(
+                    value == 1.0
+                    for value in baseline_selection[
+                        "modality_opportunity_rate"
+                    ].values()
+                )
+            )
 
             trace = None
             for trace_seed in range(100):
@@ -485,7 +504,7 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                     ("C1", "C2"),
                     rounds=1,
                     seed=trace_seed,
-                    availability_probabilities={"C1": 1.0, "C2": 1.0},
+                    availability_probabilities={"C1": 1.0, "C2": 0.5},
                     completion_probabilities={"C1": 0.5, "C2": 0.5},
                     minimum_available_clients=1,
                     trace_id="all-failed-integration-fixture",
@@ -557,8 +576,19 @@ class UniformBaselineRunnerTests(unittest.TestCase):
                     / "round_metrics.jsonl"
                 ).read_text(encoding="utf-8")
             )
+            failed_config = json.loads(
+                (
+                    output_root
+                    / "mics-failed-client-smoke"
+                    / "resolved_config.json"
+                ).read_text(encoding="utf-8")
+            )
             self.assertEqual(failed_metrics["examples_seen"], 0)
             self.assertEqual(len(failed_metrics["failed_selected_clients"]), 1)
+            self.assertEqual(
+                failed_config["selection"]["target_calibration"]["method"],
+                "availability_conditioned_exact_service_mixture_lp",
+            )
             self.assertTrue(
                 all(
                     value > 0.0

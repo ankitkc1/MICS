@@ -42,6 +42,13 @@ but contributes no upload, local examples, component update, or realised
 component service. Queue backlogs are updated from completed clients rather
 than attempted selections.
 
+Availability studies additionally report the declared per-client availability
+probabilities, realised available-client count per round, opportunity rate per
+client and component, and opportunity-conditioned stall lengths. MICS service
+targets are calibrated from the declared distribution rather than the realised
+trace, so the same target certificate is reusable across matched seeds with the
+same system model.
+
 Communication is counted from the exact tensor sizes of the modality encoders
 and shared components logically transferred by the federated protocol. It is
 not inferred from Python object size or in-process simulator memory copies.

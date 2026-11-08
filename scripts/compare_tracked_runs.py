@@ -97,8 +97,38 @@ def _longest_zero_stall(values: Sequence[int]) -> int:
     return longest
 
 
+def _longest_missed_opportunity_stall(
+    opportunities: Sequence[int],
+    realised_service: Sequence[int],
+) -> int:
+    if len(opportunities) != len(realised_service):
+        raise ValueError("Opportunity and service sequences must have equal length.")
+    longest = 0
+    current = 0
+    for opportunity, service in zip(opportunities, realised_service):
+        if not int(opportunity):
+            continue
+        if int(service):
+            current = 0
+        else:
+            current += 1
+            longest = max(longest, current)
+    return longest
+
+
+def _opportunity_conditioned_rate(
+    opportunities: Sequence[int],
+    realised_service: Sequence[int],
+) -> float | None:
+    opportunity_count = sum(int(value) for value in opportunities)
+    if opportunity_count == 0:
+        return None
+    return float(sum(int(value) for value in realised_service) / opportunity_count)
+
+
 def _selection_summary(
     metrics: Sequence[Mapping[str, Any]],
+    resolved_config: Mapping[str, Any],
 ) -> dict[str, Any]:
     diagnostics = [record["selection_diagnostics"] for record in metrics]
     modalities = tuple(sorted(diagnostics[0]["modality_coverage"]))
@@ -106,6 +136,43 @@ def _selection_summary(
         modality: [
             int(record["modality_coverage"][modality])
             for record in diagnostics
+        ]
+        for modality in modalities
+    }
+    scenario_clients = _nested(resolved_config, "scenario.clients")
+    if not isinstance(scenario_clients, Mapping):
+        raise ValueError("scenario.clients must be an object.")
+    client_modalities = {
+        str(client_id): frozenset(str(value) for value in record["modalities"])
+        for client_id, record in scenario_clients.items()
+    }
+    available_sets = [
+        frozenset(
+            str(value)
+            for value in record.get("available_clients", client_modalities)
+        )
+        for record in metrics
+    ]
+    client_availability_rate = {
+        client_id: _mean(client_id in available for available in available_sets)
+        for client_id in client_modalities
+    }
+    modality_opportunities = {
+        modality: [
+            int(
+                any(
+                    modality in client_modalities[client_id]
+                    for client_id in available
+                )
+            )
+            for available in available_sets
+        ]
+        for modality in modalities
+    }
+    realised_service = {
+        modality: [
+            int(record["component_update_counts"][f"encoder:{modality}"] > 0)
+            for record in metrics
         ]
         for modality in modalities
     }
@@ -178,6 +245,29 @@ def _selection_summary(
             else int(record["selection_diagnostics"]["eligible_client_count"])
             for record in metrics
         ],
+        "client_availability_rate": client_availability_rate,
+        "modality_opportunity_rate": {
+            modality: _mean(modality_opportunities[modality])
+            for modality in modalities
+        },
+        "maximum_consecutive_no_opportunity_rounds": {
+            modality: _longest_zero_stall(modality_opportunities[modality])
+            for modality in modalities
+        },
+        "opportunity_conditioned_component_update_rate": {
+            modality: _opportunity_conditioned_rate(
+                modality_opportunities[modality],
+                realised_service[modality],
+            )
+            for modality in modalities
+        },
+        "maximum_consecutive_missed_component_opportunities": {
+            modality: _longest_missed_opportunity_stall(
+                modality_opportunities[modality],
+                realised_service[modality],
+            )
+            for modality in modalities
+        },
         "selected_attempt_count": selected_count,
         "successful_completion_count": successful_count,
         "selected_completion_rate": successful_count / selected_count,
@@ -340,8 +430,8 @@ def main() -> None:
     if baseline_cases != candidate_cases:
         raise ValueError("Evaluation cases or modality masks are not paired.")
 
-    baseline_selection = _selection_summary(baseline_metrics)
-    candidate_selection = _selection_summary(candidate_metrics)
+    baseline_selection = _selection_summary(baseline_metrics, baseline_config)
+    candidate_selection = _selection_summary(candidate_metrics, candidate_config)
     baseline_eval_summary = _evaluation_summary(baseline_evaluation_payload)
     candidate_eval_summary = _evaluation_summary(candidate_evaluation_payload)
     integration_only = (

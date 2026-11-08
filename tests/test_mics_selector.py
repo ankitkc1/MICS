@@ -10,6 +10,7 @@ from mics import ClientState, MICSSelector, SelectionContext
 from mics.selection import (
     PURE_COVERAGE,
     TRUNCATED_LINEAR,
+    calibrate_availability_aware_service_targets,
     calibrate_static_service_targets,
     expected_component_service,
 )
@@ -68,6 +69,73 @@ class MICSSelectorTests(unittest.TestCase):
             sum(float(item["probability"]) for item in result.support),
             1.0,
         )
+
+    def test_availability_calibration_respects_rare_component_opportunity(
+        self,
+    ) -> None:
+        result = calibrate_availability_aware_service_targets(
+            {"A": {"m1"}, "C": {"m2"}},
+            budget=1,
+            priorities={"m1": 1.0, "m2": 1.0},
+            availability_probabilities={"A": 1.0, "C": 0.2},
+            minimum_available_clients=1,
+            oracle_factor=1.0,
+            safety_margin=0.2,
+        )
+
+        self.assertAlmostEqual(result.conditioning_probability, 1.0)
+        self.assertEqual(result.availability_state_count, 2)
+        self.assertAlmostEqual(result.boundary_scale, 0.2)
+        self.assertAlmostEqual(result.operational_targets["m1"], 0.16)
+        self.assertAlmostEqual(result.operational_targets["m2"], 0.16)
+
+    def test_full_availability_calibration_matches_static_capacity(self) -> None:
+        arguments = {
+            "client_modalities": {"A": {"m1"}, "C": {"m2"}},
+            "budget": 1,
+            "priorities": {"m1": 1.0, "m2": 1.0},
+            "oracle_factor": 1.0,
+            "safety_margin": 0.2,
+        }
+        static = calibrate_static_service_targets(**arguments)
+        availability_aware = calibrate_availability_aware_service_targets(
+            **arguments,
+            availability_probabilities={"A": 1.0, "C": 1.0},
+            minimum_available_clients=1,
+        )
+
+        self.assertAlmostEqual(
+            availability_aware.boundary_scale,
+            static.boundary_scale,
+        )
+        self.assertEqual(availability_aware.availability_state_count, 1)
+        self.assertEqual(
+            availability_aware.operational_targets,
+            static.operational_targets,
+        )
+
+    def test_availability_calibration_conditions_on_feasible_rounds(self) -> None:
+        result = calibrate_availability_aware_service_targets(
+            {"A": {"m1"}, "C": {"m2"}},
+            budget=1,
+            priorities={"m1": 1.0, "m2": 1.0},
+            availability_probabilities={"A": 0.5, "C": 0.5},
+            minimum_available_clients=1,
+            oracle_factor=1.0,
+            safety_margin=0.2,
+        )
+
+        self.assertAlmostEqual(result.conditioning_probability, 0.75)
+        self.assertEqual(result.availability_state_count, 3)
+        self.assertAlmostEqual(result.boundary_scale, 0.5)
+        state_probabilities = {
+            tuple(item["available_clients"]): item[
+                "availability_state_probability"
+            ]
+            for item in result.support
+        }
+        self.assertAlmostEqual(state_probabilities[("A",)], 1.0 / 3.0)
+        self.assertAlmostEqual(state_probabilities[("C",)], 1.0 / 3.0)
 
     def test_impact_prefers_client_covering_both_modalities(self) -> None:
         selector = MICSSelector(

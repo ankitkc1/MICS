@@ -134,6 +134,44 @@ class StaticServiceCalibration:
         }
 
 
+@dataclass(frozen=True)
+class AvailabilityAwareServiceCalibration:
+    """Exact capacity calibration over a random available-client set."""
+
+    boundary_scale: float
+    operational_targets: Mapping[str, float]
+    priorities: Mapping[str, float]
+    oracle_factor: float
+    safety_margin: float
+    availability_probabilities: Mapping[str, float]
+    minimum_available_clients: int
+    conditioning_probability: float
+    support: tuple[Mapping[str, Any], ...]
+    availability_state_count: int
+    feasible_action_count: int
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "method": "availability_conditioned_exact_service_mixture_lp",
+            "availability_model": (
+                "independent_bernoulli_conditioned_on_minimum_count"
+            ),
+            "boundary_scale": self.boundary_scale,
+            "operational_targets": dict(self.operational_targets),
+            "priorities": dict(self.priorities),
+            "oracle_factor": self.oracle_factor,
+            "safety_margin": self.safety_margin,
+            "availability_probabilities": dict(
+                self.availability_probabilities
+            ),
+            "minimum_available_clients": self.minimum_available_clients,
+            "conditioning_probability": self.conditioning_probability,
+            "support": [dict(item) for item in self.support],
+            "availability_state_count": self.availability_state_count,
+            "feasible_action_count": self.feasible_action_count,
+        }
+
+
 def calibrate_static_service_targets(
     client_modalities: Mapping[str, Iterable[str]],
     *,
@@ -312,6 +350,274 @@ def calibrate_static_service_targets(
         safety_margin=margin,
         support=tuple(support),
         feasible_set_count=len(feasible_sets),
+    )
+
+
+def calibrate_availability_aware_service_targets(
+    client_modalities: Mapping[str, Iterable[str]],
+    *,
+    budget: int,
+    priorities: Mapping[str, float],
+    availability_probabilities: Mapping[str, float],
+    minimum_available_clients: int,
+    completion_probabilities: Mapping[str, float] | None = None,
+    service_type: str = PURE_COVERAGE,
+    saturation_levels: Mapping[str, int] | None = None,
+    oracle_factor: float = 1.0 - 1.0 / math.e,
+    safety_margin: float = 0.1,
+) -> AvailabilityAwareServiceCalibration:
+    """Calibrate long-run targets over all conditioned availability states.
+
+    The LP represents a policy as a conditional mixture of feasible client
+    subsets for each availability state. Availability-state probabilities are
+    calculated from the declared independent Bernoulli model, conditioned on
+    at least ``minimum_available_clients`` being online. Realised trace rounds
+    are deliberately not used, avoiding future-state look-ahead.
+    """
+
+    try:
+        from scipy.optimize import linprog
+        from scipy.sparse import coo_matrix
+    except ImportError as error:  # pragma: no cover - dependency is declared
+        raise RuntimeError(
+            "Availability-aware target calibration requires SciPy."
+        ) from error
+
+    manifests = {
+        str(client_id): frozenset(str(name) for name in modalities)
+        for client_id, modalities in client_modalities.items()
+    }
+    if not manifests or any(not values for values in manifests.values()):
+        raise ValueError("Every calibrated client must expose a modality.")
+    if len(manifests) > 16:
+        raise ValueError(
+            "Exact availability calibration is restricted to at most 16 clients."
+        )
+    cardinality = int(budget)
+    minimum = int(minimum_available_clients)
+    if cardinality <= 0 or cardinality > len(manifests):
+        raise ValueError("budget must lie between one and the client count.")
+    if minimum < cardinality or minimum > len(manifests):
+        raise ValueError(
+            "minimum_available_clients must support the selection budget."
+        )
+    raw_priorities = _finite_nonnegative_mapping(priorities, name="priorities")
+    if any(value <= 0.0 for value in raw_priorities.values()):
+        raise ValueError("Every service priority must be positive.")
+    maximum_priority = max(raw_priorities.values())
+    normalized_priorities = {
+        name: value / maximum_priority
+        for name, value in raw_priorities.items()
+    }
+    modalities = tuple(normalized_priorities)
+    unknown = {
+        modality
+        for values in manifests.values()
+        for modality in values
+        if modality not in normalized_priorities
+    }
+    if unknown:
+        raise ValueError(
+            f"Client manifests contain unknown modalities: {sorted(unknown)}"
+        )
+    missing = [
+        modality
+        for modality in modalities
+        if not any(modality in values for values in manifests.values())
+    ]
+    if missing:
+        raise ValueError(f"No client can serve modalities: {missing}")
+    if service_type not in MICS_SERVICE_TYPES:
+        raise ValueError(f"service_type must be one of {MICS_SERVICE_TYPES}.")
+    if saturation_levels is not None and set(saturation_levels) != set(modalities):
+        raise ValueError("saturation_levels must define every calibrated modality.")
+    levels = {
+        modality: int(
+            1 if saturation_levels is None else saturation_levels[modality]
+        )
+        for modality in modalities
+    }
+    if any(value <= 0 for value in levels.values()):
+        raise ValueError("Saturation levels must be positive integers.")
+    if service_type == PURE_COVERAGE and any(value != 1 for value in levels.values()):
+        raise ValueError("Pure coverage requires saturation level one.")
+    if set(availability_probabilities) != set(manifests):
+        raise ValueError(
+            "availability_probabilities must define every calibrated client."
+        )
+    if completion_probabilities is not None and set(
+        completion_probabilities
+    ) != set(manifests):
+        raise ValueError(
+            "completion_probabilities must define every calibrated client."
+        )
+    availability = {
+        client_id: _validate_probability(
+            availability_probabilities[client_id],
+            name=f"availability probability for {client_id}",
+        )
+        for client_id in manifests
+    }
+    completion = {
+        client_id: _validate_probability(
+            1.0
+            if completion_probabilities is None
+            else completion_probabilities[client_id],
+            name=f"completion probability for {client_id}",
+        )
+        for client_id in manifests
+    }
+    if sum(value > 0.0 for value in availability.values()) < minimum:
+        raise ValueError("Availability model cannot meet its minimum count.")
+    factor = float(oracle_factor)
+    margin = float(safety_margin)
+    if not math.isfinite(factor) or not 0.0 < factor <= 1.0:
+        raise ValueError("oracle_factor must lie in (0, 1].")
+    if not math.isfinite(margin) or not 0.0 < margin < 1.0:
+        raise ValueError("safety_margin must lie in (0, 1).")
+
+    client_ids = tuple(sorted(manifests))
+    unconditioned_states = []
+    for inclusion in itertools.product((False, True), repeat=len(client_ids)):
+        available_clients = tuple(
+            client_id
+            for client_id, included in zip(client_ids, inclusion)
+            if included
+        )
+        if len(available_clients) < minimum:
+            continue
+        probability = math.prod(
+            availability[client_id]
+            if included
+            else 1.0 - availability[client_id]
+            for client_id, included in zip(client_ids, inclusion)
+        )
+        if probability > 0.0:
+            unconditioned_states.append((available_clients, probability))
+    conditioning_probability = math.fsum(
+        probability for _, probability in unconditioned_states
+    )
+    if conditioning_probability <= 0.0:
+        raise ValueError("Conditioned availability event has zero probability.")
+    states = tuple(
+        (available_clients, probability / conditioning_probability)
+        for available_clients, probability in unconditioned_states
+    )
+    if len(states) > 4_096:
+        raise ValueError(
+            "Exact calibration has more than 4,096 availability states."
+        )
+
+    actions: list[tuple[int, tuple[str, ...], tuple[float, ...]]] = []
+    for state_index, (available_clients, _) in enumerate(states):
+        for size in range(cardinality + 1):
+            for selection in itertools.combinations(available_clients, size):
+                service = tuple(
+                    expected_component_service(
+                        (
+                            completion[client_id]
+                            for client_id in selection
+                            if modality in manifests[client_id]
+                        ),
+                        service_type=service_type,
+                        saturation_level=levels[modality],
+                    )
+                    for modality in modalities
+                )
+                actions.append((state_index, selection, service))
+    if len(actions) > 250_000:
+        raise ValueError(
+            "Exact availability calibration has more than 250,000 actions."
+        )
+
+    scale_index = len(actions)
+    variable_count = scale_index + 1
+    objective = [0.0] * variable_count
+    objective[scale_index] = -1.0
+    inequality_rows = []
+    inequality_columns = []
+    inequality_values = []
+    equality_rows = []
+    equality_columns = []
+    for action_index, (state_index, _, service) in enumerate(actions):
+        equality_rows.append(state_index)
+        equality_columns.append(action_index)
+        for modality_index, value in enumerate(service):
+            if value == 0.0:
+                continue
+            inequality_rows.append(modality_index)
+            inequality_columns.append(action_index)
+            inequality_values.append(-value)
+    for modality_index, modality in enumerate(modalities):
+        inequality_rows.append(modality_index)
+        inequality_columns.append(scale_index)
+        inequality_values.append(normalized_priorities[modality])
+    inequality_matrix = coo_matrix(
+        (
+            inequality_values,
+            (inequality_rows, inequality_columns),
+        ),
+        shape=(len(modalities), variable_count),
+    ).tocsr()
+    equality_matrix = coo_matrix(
+        (
+            [1.0] * len(actions),
+            (equality_rows, equality_columns),
+        ),
+        shape=(len(states), variable_count),
+    ).tocsr()
+    result = linprog(
+        objective,
+        A_ub=inequality_matrix,
+        b_ub=[0.0] * len(modalities),
+        A_eq=equality_matrix,
+        b_eq=[probability for _, probability in states],
+        bounds=[(0.0, None)] * variable_count,
+        method="highs",
+    )
+    if not result.success:
+        raise RuntimeError(
+            f"Availability-aware service calibration failed: {result.message}"
+        )
+    boundary_scale = float(result.x[scale_index])
+    operational_scale = (1.0 - margin) * factor * boundary_scale
+    targets = {
+        modality: operational_scale * normalized_priorities[modality]
+        for modality in modalities
+    }
+    support = []
+    for action_index, joint_probability in enumerate(result.x[:scale_index]):
+        if joint_probability <= 1e-10:
+            continue
+        state_index, selection, service = actions[action_index]
+        available_clients, state_probability = states[state_index]
+        support.append(
+            {
+                "available_clients": list(available_clients),
+                "availability_state_probability": float(state_probability),
+                "selected_clients": list(selection),
+                "joint_probability": float(joint_probability),
+                "conditional_selection_probability": float(
+                    joint_probability / state_probability
+                ),
+                "expected_service": {
+                    modality: float(service[modality_index])
+                    for modality_index, modality in enumerate(modalities)
+                },
+            }
+        )
+    return AvailabilityAwareServiceCalibration(
+        boundary_scale=boundary_scale,
+        operational_targets=targets,
+        priorities=normalized_priorities,
+        oracle_factor=factor,
+        safety_margin=margin,
+        availability_probabilities=availability,
+        minimum_available_clients=minimum,
+        conditioning_probability=conditioning_probability,
+        support=tuple(support),
+        availability_state_count=len(states),
+        feasible_action_count=len(actions),
     )
 
 
