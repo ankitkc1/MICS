@@ -150,6 +150,29 @@ sliding-window inference, WT/TC/ET Dice and HD95, per-client reductions,
 macro-client and sample-weighted reductions, timing, and memory accounting. The
 eight-case subset is an integration check, not a performance result.
 
+After the individual selector jobs pass, validate the complete matched
+four-method path. Point the job to an existing validation-only modality
+importance record:
+
+    export MICS_IMPORTANCE_OUTPUT=/absolute/path/to/modality_importance.json
+    bash -n hpc/slurm/four_method_matrix_smoke.slurm
+    JOB_ID=$(sbatch --parsable hpc/slurm/four_method_matrix_smoke.slurm)
+    echo "JOB_ID=$JOB_ID"
+
+Inspect the complete job by its scheduler ID:
+
+    sacct -j "$JOB_ID" --allocations \
+      --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS,ReqMem
+    cat "mics-four-way-${JOB_ID}.out"
+    cat "mics-four-way-${JOB_ID}.err"
+    cat "results/four-way-method-matrix-smoke-${JOB_ID}.json"
+
+The job generates one neutral availability/completion trace; runs Uniform
+Random, Power-of-Choice, DivFL-style, and MICS-Impact from the same model seed;
+evaluates the same validation case for every client; and produces one guarded
+matrix report. The report must remain marked as ineligible for scientific
+interpretation because training and validation are truncated.
+
 Full training retains `last.pt` every round and archives a checkpoint every ten
 rounds, plus the final round. Full validation uses all 48 validation cases at
 those preregistered checkpoints. Local-test and global-test evaluation remain

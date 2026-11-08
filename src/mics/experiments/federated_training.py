@@ -73,8 +73,15 @@ class FederatedTrainingLoopConfig:
             raise ValueError("data_seed must be non-negative.")
 
 
-def _stable_seed(base_seed: int, round_index: int, client_id: str) -> int:
-    material = f"{base_seed}:{round_index}:{client_id}".encode("utf-8")
+def _stable_seed(
+    base_seed: int,
+    round_index: int,
+    client_id: str,
+    stream: str,
+) -> int:
+    material = (
+        f"{base_seed}:{stream}:{round_index}:{client_id}".encode("utf-8")
+    )
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big") % (2**63)
 
 
@@ -85,7 +92,12 @@ def _build_loader(
     loop: FederatedTrainingLoopConfig,
     round_index: int,
 ) -> DataLoader:
-    seed = _stable_seed(loop.data_seed, round_index, client_id)
+    seed = _stable_seed(
+        loop.data_seed,
+        round_index,
+        client_id,
+        "data_loader",
+    )
     dataset = build_brats_scenario_dataset(
         loop.dataset_root,
         scenario,
@@ -400,6 +412,12 @@ def run_tracked_federated_training(
                         modalities=client.modalities,
                         batches=loader,
                         aggregation_weight=float(len(client.train_case_ids)),
+                        random_seed=_stable_seed(
+                            loop.data_seed,
+                            round_index,
+                            client_id,
+                            "local_training",
+                        ),
                     )
                 )
 
@@ -584,6 +602,7 @@ def _round_record(
         "clients": {
             local.client_id: {
                 "modalities": list(scenario.client(local.client_id).modalities),
+                "local_training_random_seed": local.random_seed,
                 "dataset_size": len(
                     scenario.client(local.client_id).train_case_ids
                 ),

@@ -39,6 +39,8 @@ Implemented and tested:
   system-heterogeneity experiments;
 - immutable run metadata, selector-state checkpoints, and resume support;
 - guarded paired-run audits for selection, service, communication, and metrics;
+- a guarded four-method Uniform--Power-of-Choice--DivFL--MICS matrix with
+  matched system traces, client-round random streams, and held-out cases;
 - CPU tests and an HPC GPU smoke-job template.
 
 Planned but not yet claimed as experimental evidence:

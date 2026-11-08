@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import unittest
 from collections import OrderedDict
 
@@ -111,6 +112,70 @@ class LocalTrainingTests(unittest.TestCase):
     def test_rejects_invalid_configuration(self) -> None:
         with self.assertRaisesRegex(ValueError, "local_epochs"):
             LocalTrainingConfig(local_epochs=0)
+
+    def test_client_seed_isolates_modality_dropout_from_global_rng(self) -> None:
+        torch.manual_seed(8)
+        first_model = MultiEncoderUNet3D(
+            modalities=OrderedDict((("flair", 1), ("t1ce", 1))),
+            num_classes=4,
+            base_channels=2,
+            num_levels=2,
+            fusion="mean_var",
+            modality_dropout=0.5,
+        )
+        second_model = copy.deepcopy(first_model)
+        generator = torch.Generator().manual_seed(17)
+        batch = {
+            "inputs": {
+                name: torch.randn(
+                    1,
+                    1,
+                    8,
+                    8,
+                    8,
+                    generator=generator,
+                )
+                for name in ("flair", "t1ce")
+            },
+            "target": torch.randint(
+                0,
+                4,
+                (1, 8, 8, 8),
+                generator=generator,
+            ),
+            "availability": torch.tensor([[True, True]]),
+        }
+        settings = LocalTrainingConfig(amp=False, max_batches_per_epoch=1)
+        first = train_local_client(
+            first_model,
+            [batch],
+            client_id="C1",
+            available_modalities=("flair", "t1ce"),
+            device="cpu",
+            config=settings,
+            aggregation_weight=1.0,
+            random_seed=1234,
+        )
+        torch.manual_seed(999)
+        torch.rand(100)
+        second = train_local_client(
+            second_model,
+            [batch],
+            client_id="C1",
+            available_modalities=("flair", "t1ce"),
+            device="cpu",
+            config=settings,
+            aggregation_weight=1.0,
+            random_seed=1234,
+        )
+
+        self.assertEqual(first.random_seed, 1234)
+        self.assertEqual(first.mean_loss, second.mean_loss)
+        for component, state in first.update.states.items():
+            for name, value in state.items():
+                self.assertTrue(
+                    torch.equal(value, second.update.states[component][name])
+                )
 
 
 if __name__ == "__main__":

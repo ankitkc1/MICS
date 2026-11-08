@@ -198,6 +198,14 @@ def _resolved_config(
             "amp_initial_scale": arguments.amp_initial_scale,
             "amp_max_retries": arguments.amp_max_retries,
             "max_batches_per_epoch": arguments.max_batches_per_epoch,
+            "random_streams": {
+                "data_loader": (
+                    "sha256(data_seed:data_loader:round:client)"
+                ),
+                "local_training": (
+                    "sha256(data_seed:local_training:round:client)"
+                ),
+            },
         },
         "seeds": {
             "model": arguments.model_seed,

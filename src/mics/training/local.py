@@ -54,6 +54,7 @@ class LocalTrainingResult:
     """Metrics and component states produced by one selected client."""
 
     client_id: str
+    random_seed: int | None
     examples_seen: int
     aggregation_weight: float
     batches_processed: int
@@ -177,6 +178,7 @@ def train_local_client(
     criterion: nn.Module | None = None,
     aggregation_weight: float | None = None,
     epoch_offset: int = 0,
+    random_seed: int | None = None,
 ) -> LocalTrainingResult:
     """Train one logical client and return only components it updated.
 
@@ -189,6 +191,8 @@ def train_local_client(
         raise ValueError("client_id cannot be empty.")
     if epoch_offset < 0:
         raise ValueError("epoch_offset cannot be negative.")
+    if random_seed is not None and random_seed < 0:
+        raise ValueError("random_seed cannot be negative.")
     settings = config or LocalTrainingConfig()
     modality_names = tuple(str(name) for name in available_modalities)
     if not modality_names:
@@ -220,6 +224,11 @@ def train_local_client(
         enabled=use_amp,
         init_scale=settings.amp_initial_scale,
     )
+    local_generator = (
+        None
+        if random_seed is None
+        else torch.Generator(device=target_device).manual_seed(random_seed)
+    )
 
     declared_weight = _aggregation_weight(batches, aggregation_weight)
     trainable_components = model.trainable_component_names()
@@ -246,14 +255,25 @@ def train_local_client(
             maximum_attempts = 1 + (
                 settings.amp_max_retries if use_amp else 0
             )
+            batch_generator_state = (
+                None
+                if local_generator is None
+                else local_generator.get_state()
+            )
             for attempt in range(1, maximum_attempts + 1):
+                if attempt > 1 and batch_generator_state is not None:
+                    local_generator.set_state(batch_generator_state)
                 optimizer.zero_grad(set_to_none=True)
                 with torch.autocast(
                     device_type=target_device.type,
                     dtype=torch.float16,
                     enabled=use_amp,
                 ):
-                    logits = model(inputs, availability)
+                    logits = model(
+                        inputs,
+                        availability,
+                        modality_dropout_generator=local_generator,
+                    )
                     loss = loss_function(logits, target)
 
                 if not bool(torch.isfinite(loss)):
@@ -331,6 +351,7 @@ def train_local_client(
 
     return LocalTrainingResult(
         client_id=str(client_id),
+        random_seed=random_seed,
         examples_seen=examples_seen,
         aggregation_weight=final_weight,
         batches_processed=batches_processed,

@@ -39,6 +39,12 @@ Policies consume different numbers of selection draws. Sharing that generator
 with data shuffling silently changes local minibatch order and invalidates a
 controlled policy comparison.
 
+Local-training stochasticity is also client--round scoped. MICS derives
+separate data-loader and local-training seeds from the declared data seed,
+stream name, round index, and client ID. The local seed controls modality
+dropout and is written into the round record. Consequently, changing the
+selected-client order cannot change another client's dropout mask.
+
 ## Matched system-heterogeneity traces
 
 Availability and completion events must be generated before either selection

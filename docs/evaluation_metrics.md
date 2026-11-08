@@ -145,6 +145,12 @@ whole-volume evaluation cases and modality masks differ. Smoke-run differences
 are recorded for pipeline verification only and are explicitly marked as
 ineligible for model-quality or selector-superiority claims.
 
+The multi-method audit applies the same checks jointly to Uniform Random,
+Power-of-Choice, DivFL-style selection, and MICS. It additionally requires a
+clean common source revision and runtime environment, reports every method
+against the same reference, and discloses MICS's external modality-importance
+probe cost separately from per-round selection costs.
+
 Primary references:
 
 - Oort: https://www.usenix.org/conference/osdi21/presentation/lai

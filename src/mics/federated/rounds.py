@@ -28,6 +28,7 @@ class ClientRoundSpec:
     modalities: tuple[str, ...]
     batches: Iterable[Mapping[str, Any]]
     aggregation_weight: float
+    random_seed: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -41,6 +42,8 @@ class ClientRoundSpec:
             raise ValueError("modalities cannot be empty.")
         if self.aggregation_weight <= 0:
             raise ValueError("aggregation_weight must be positive.")
+        if self.random_seed is not None and self.random_seed < 0:
+            raise ValueError("random_seed cannot be negative.")
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,7 @@ def run_federated_round(
             config=settings,
             aggregation_weight=client.aggregation_weight,
             epoch_offset=round_index * settings.local_epochs,
+            random_seed=client.random_seed,
         )
         local_results.append(result)
 

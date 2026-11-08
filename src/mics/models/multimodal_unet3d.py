@@ -279,15 +279,30 @@ class MultiEncoderUNet3D(nn.Module):
             raise ValueError("Every sample must have at least one available modality.")
         return present, mask
 
-    def _apply_modality_dropout(self, mask: torch.Tensor) -> torch.Tensor:
+    def _apply_modality_dropout(
+        self,
+        mask: torch.Tensor,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
         if not self.training or self.modality_dropout == 0.0:
             return mask
 
-        keep = torch.rand(mask.shape, device=mask.device) >= self.modality_dropout
+        keep = (
+            torch.rand(
+                mask.shape,
+                device=mask.device,
+                generator=generator,
+            )
+            >= self.modality_dropout
+        )
         dropped = mask & keep
         empty = ~dropped.any(dim=1)
         if torch.any(empty):
-            random_scores = torch.rand(mask.shape, device=mask.device)
+            random_scores = torch.rand(
+                mask.shape,
+                device=mask.device,
+                generator=generator,
+            )
             random_scores = random_scores.masked_fill(~mask, -1.0)
             fallback = random_scores.argmax(dim=1)
             rows = torch.arange(mask.shape[0], device=mask.device)[empty]
@@ -300,9 +315,13 @@ class MultiEncoderUNet3D(nn.Module):
         availability_mask: torch.Tensor | Mapping[str, torch.Tensor] | None = None,
         *,
         return_aux: bool = False,
+        modality_dropout_generator: torch.Generator | None = None,
     ) -> torch.Tensor | dict[str, Any]:
         present, mask = self._validate_inputs(inputs, availability_mask)
-        effective_mask = self._apply_modality_dropout(mask)
+        effective_mask = self._apply_modality_dropout(
+            mask,
+            generator=modality_dropout_generator,
+        )
 
         encoded: dict[str, tuple[torch.Tensor, ...]] = {}
         for index, name in enumerate(self.modality_names):

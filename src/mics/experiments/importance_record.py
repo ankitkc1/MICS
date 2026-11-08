@@ -21,6 +21,7 @@ class LoadedModalityImportance:
     complete_validation_probe: bool
 
     def source_record(self) -> dict[str, Any]:
+        importance = self.payload.get("importance", {})
         return {
             "path": str(self.path),
             "sha256": self.sha256,
@@ -28,6 +29,8 @@ class LoadedModalityImportance:
             "weights": dict(self.weights),
             "complete_validation_probe": self.complete_validation_probe,
             "checkpoint": self.payload.get("checkpoint"),
+            "probe_cost": importance.get("probe_cost"),
+            "test_data_accessed": importance.get("test_data_accessed"),
         }
 
 
