@@ -17,6 +17,13 @@ from typing import Any
 from .brats import BRATS_MODALITIES, BraTSNpyDataset, read_case_ids
 
 BRATS_PARTITIONS = ("train", "validation", "test")
+BRATS_CALIBRATION_PARTITION = "calibration"
+BRATS_SCIENTIFIC_PARTITIONS = (
+    "train",
+    BRATS_CALIBRATION_PARTITION,
+    "validation",
+    "test",
+)
 
 
 def _normalise_client_id(value: str | int) -> str:
@@ -106,20 +113,33 @@ class BraTSClientScenario:
     train_case_ids: tuple[str, ...]
     validation_case_ids: tuple[str, ...]
     test_case_ids: tuple[str, ...]
+    calibration_file: Path | None = None
+    calibration_case_ids: tuple[str, ...] = ()
+
+    @property
+    def partitions(self) -> tuple[str, ...]:
+        return (
+            BRATS_SCIENTIFIC_PARTITIONS
+            if self.calibration_file is not None
+            else BRATS_PARTITIONS
+        )
 
     def split_file(self, partition: str) -> Path:
         name = str(partition).strip().lower()
-        if name not in BRATS_PARTITIONS:
+        if name not in self.partitions:
             raise ValueError(
-                f"partition must be one of {BRATS_PARTITIONS}, found {partition!r}."
+                f"partition must be one of {self.partitions}, found {partition!r}."
             )
-        return getattr(self, f"{name}_file")
+        result = getattr(self, f"{name}_file")
+        if result is None:
+            raise ValueError(f"Client {self.client_id} has no {name} partition.")
+        return result
 
     def case_ids(self, partition: str) -> tuple[str, ...]:
         name = str(partition).strip().lower()
-        if name not in BRATS_PARTITIONS:
+        if name not in self.partitions:
             raise ValueError(
-                f"partition must be one of {BRATS_PARTITIONS}, found {partition!r}."
+                f"partition must be one of {self.partitions}, found {partition!r}."
             )
         return getattr(self, f"{name}_case_ids")
 
@@ -145,10 +165,17 @@ class BraTSScenario:
         raise KeyError(f"Unknown client in scenario {self.scenario_id}: {requested}")
 
     @property
+    def partitions(self) -> tuple[str, ...]:
+        first = self.clients[0].partitions
+        if any(client.partitions != first for client in self.clients[1:]):
+            raise ValueError("Scenario clients expose inconsistent partitions.")
+        return first
+
+    @property
     def partition_counts(self) -> dict[str, int]:
         return {
             partition: sum(len(client.case_ids(partition)) for client in self.clients)
-            for partition in BRATS_PARTITIONS
+            for partition in self.partitions
         }
 
     @property
@@ -162,7 +189,7 @@ class BraTSScenario:
     def covered_case_count(self) -> int:
         covered = set(self.global_test_case_ids)
         for client in self.clients:
-            for partition in BRATS_PARTITIONS:
+            for partition in self.partitions:
                 covered.update(client.case_ids(partition))
         return len(covered)
 
@@ -170,9 +197,11 @@ class BraTSScenario:
 def _validate_case_assignments(
     clients: tuple[BraTSClientScenario, ...],
     global_test_case_ids: tuple[str, ...],
+    *,
+    partitions: tuple[str, ...],
 ) -> set[str]:
     partition_sets: dict[str, set[str]] = {}
-    for partition in BRATS_PARTITIONS:
+    for partition in partitions:
         assignments = [
             case_id
             for client in clients
@@ -247,8 +276,13 @@ def load_brats_scenario(
         raise ValueError("Scenario configuration must contain a JSON object.")
 
     schema_version = int(payload.get("schema_version", -1))
-    if schema_version != 1:
+    if schema_version not in (1, 2):
         raise ValueError(f"Unsupported scenario schema_version: {schema_version}")
+    partitions = (
+        BRATS_SCIENTIFIC_PARTITIONS
+        if schema_version == 2
+        else BRATS_PARTITIONS
+    )
     scenario_id = str(payload.get("split_id", "")).strip()
     if not scenario_id:
         raise ValueError("Scenario configuration requires a non-empty split_id.")
@@ -309,7 +343,7 @@ def load_brats_scenario(
         )
         files: dict[str, Path] = {}
         cases: dict[str, tuple[str, ...]] = {}
-        for partition in BRATS_PARTITIONS:
+        for partition in partitions:
             if partition not in raw_client["files"]:
                 raise ValueError(f"Client {client_id} has no {partition} file.")
             split_file = _resolve_materialized_file(
@@ -329,6 +363,11 @@ def load_brats_scenario(
                 train_case_ids=cases["train"],
                 validation_case_ids=cases["validation"],
                 test_case_ids=cases["test"],
+                calibration_file=files.get(BRATS_CALIBRATION_PARTITION),
+                calibration_case_ids=cases.get(
+                    BRATS_CALIBRATION_PARTITION,
+                    (),
+                ),
             )
         )
 
@@ -346,7 +385,11 @@ def load_brats_scenario(
         additional_local_directories=(path.parent.parent,),
     )
     global_test_case_ids = read_case_ids(global_test_file)
-    covered = _validate_case_assignments(client_tuple, global_test_case_ids)
+    covered = _validate_case_assignments(
+        client_tuple,
+        global_test_case_ids,
+        partitions=partitions,
+    )
 
     expected_pools_raw = payload.get("expected_modality_pool_sizes")
     if not isinstance(expected_pools_raw, dict):
@@ -405,7 +448,9 @@ def validate_matched_brats_scenarios(
 
     changed_clients: list[str] = []
     for left, right in zip(reference.clients, comparison.clients, strict=True):
-        for partition in BRATS_PARTITIONS:
+        if left.partitions != right.partitions:
+            raise ValueError("Matched scenarios expose different partitions.")
+        for partition in left.partitions:
             if left.case_ids(partition) != right.case_ids(partition):
                 raise ValueError(
                     f"Matched scenarios differ in {left.client_id} {partition} cases."
@@ -432,14 +477,15 @@ def build_brats_scenario_dataset(
 
     client = scenario.client(client_id)
     partition_name = str(partition).strip().lower()
-    if partition_name not in BRATS_PARTITIONS:
+    if partition_name not in scenario.partitions:
         raise ValueError(
-            f"partition must be one of {BRATS_PARTITIONS}, found {partition!r}."
+            f"partition must be one of {scenario.partitions}, found {partition!r}."
         )
     is_training = partition_name == "train" if training is None else bool(training)
     if is_training and partition_name != "train":
         raise ValueError(
-            "Validation and test partitions cannot be opened in training mode."
+            "Calibration, validation, and test partitions cannot be opened "
+            "in training mode."
         )
     return BraTSNpyDataset(
         dataset_root,

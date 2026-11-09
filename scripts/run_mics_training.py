@@ -57,6 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--importance-output", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path("results"))
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--study-id")
+    parser.add_argument("--protocol-manifest", type=Path)
     parser.add_argument("--rounds", type=int, default=150)
     parser.add_argument("--clients-per-round", type=int, default=2)
     parser.add_argument("--checkpoint-every", type=int, default=10)
@@ -101,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _scenario_files(scenario: BraTSScenario) -> tuple[Path, ...]:
     files = [scenario.config_path, scenario.global_test_file]
     for client in scenario.clients:
-        files.extend((client.train_file, client.validation_file, client.test_file))
+        files.extend(client.split_file(name) for name in scenario.partitions)
     return tuple(files)
 
 
@@ -139,6 +141,15 @@ def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
         raise SystemExit("Batch size or worker count is invalid.")
     if min(arguments.model_seed, arguments.selection_seed, arguments.data_seed) < 0:
         raise SystemExit("Scientific seeds must be non-negative.")
+    if (arguments.study_id is None) != (arguments.protocol_manifest is None):
+        raise SystemExit(
+            "--study-id and --protocol-manifest must be supplied together."
+        )
+    if (
+        arguments.protocol_manifest is not None
+        and not arguments.protocol_manifest.is_file()
+    ):
+        raise SystemExit("Protocol manifest does not exist.")
     target_device = torch.device(arguments.device)
     if target_device.type == "cuda" and not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable; submit this runner through a GPU job.")
@@ -147,6 +158,7 @@ def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
 
 def _load_importance(
     arguments: argparse.Namespace,
+    scenario: BraTSScenario,
 ) -> LoadedModalityImportance | None:
     if arguments.impact_weight == 0.0:
         if arguments.importance_output is not None:
@@ -161,11 +173,24 @@ def _load_importance(
         modalities=BRATS_MODALITIES,
     )
     is_smoke = arguments.max_batches_per_epoch is not None
-    if not is_smoke and not loaded.complete_validation_probe:
+    if not is_smoke and not loaded.complete_probe:
         raise SystemExit(
             "A full MICS run cannot use subset importance estimates. Run the "
-            "complete validation probe after freezing the study protocol."
+            "complete calibration probe after freezing the study protocol."
         )
+    if not is_smoke and "calibration" in scenario.partitions:
+        if not loaded.complete_calibration_probe:
+            raise SystemExit(
+                "This scientific scenario requires importance estimated only "
+                "from its complete calibration partition."
+            )
+        source_scenario = loaded.payload.get("scenario")
+        if not isinstance(source_scenario, dict):
+            raise SystemExit("Importance record has no scenario provenance.")
+        if source_scenario.get("sha256") != sha256_file(scenario.config_path):
+            raise SystemExit(
+                "Importance record was not estimated from this exact scenario."
+            )
     return loaded
 
 
@@ -193,7 +218,11 @@ def _resolved_config(
         else (
             "uniform"
             if arguments.ablation == "uniform_importance"
-            else "validation_derived"
+            else (
+                "calibration_derived"
+                if importance is not None and importance.partition == "calibration"
+                else "validation_derived"
+            )
         )
     )
     return {
@@ -203,6 +232,15 @@ def _resolved_config(
             "integration_smoke_not_model_quality"
             if is_smoke
             else "full_training_checkpoint_for_held_out_evaluation"
+        ),
+        "study": (
+            None
+            if arguments.study_id is None
+            else {
+                "id": arguments.study_id,
+                "protocol_manifest": str(arguments.protocol_manifest.resolve()),
+                "protocol_sha256": sha256_file(arguments.protocol_manifest),
+            }
         ),
         "scenario": {
             "id": scenario.scenario_id,
@@ -219,6 +257,7 @@ def _resolved_config(
                 client.client_id: {
                     "modalities": list(client.modalities),
                     "train_count": len(client.train_case_ids),
+                    "calibration_count": len(client.calibration_case_ids),
                     "validation_count": len(client.validation_case_ids),
                     "test_count": len(client.test_case_ids),
                 }
@@ -320,7 +359,7 @@ def main() -> None:
         if arguments.system_trace is None
         else load_system_trace(arguments.system_trace)
     )
-    importance = _load_importance(arguments)
+    importance = _load_importance(arguments, scenario)
     component_importance = (
         {}
         if arguments.impact_weight == 0.0

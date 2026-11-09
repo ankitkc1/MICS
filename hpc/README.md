@@ -20,10 +20,11 @@ limit and use the subsequently validated whole-volume evaluation schedule.
 `MICS_RUN_DIR`. It evaluates only a small validation subset and refuses to use
 the locked test partition.
 
-For future array studies, each task must receive an immutable experiment
-configuration, seed, output directory, and run identifier. The task must refuse
-to overwrite a completed run. Scheduler job ID and array task ID must be
-recorded in run metadata, not used as scientific random seeds.
+The full MICS ablation array is defined by
+`configs/mics_ablation_study_v1.json`. Each task resolves one immutable seed
+tuple, generates its matched potential-outcome trace, resumes incomplete runs,
+skips completed artifacts, and refuses protocol drift. Scheduler job and array
+IDs are recorded as runtime metadata but never used as scientific seeds.
 
 Long jobs must checkpoint enough information to reproduce an uninterrupted
 trajectory: next round, global component states, client optimizer states,

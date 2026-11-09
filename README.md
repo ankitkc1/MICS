@@ -29,7 +29,8 @@ Implemented and tested:
 - sequential synchronous federated rounds with component-wise aggregation;
 - whole-volume Gaussian sliding-window inference and BraTS Dice/HD95 metrics;
 - a selector interface with a reproducible uniform-random baseline;
-- validation-only paired leave-one-modality-out importance estimation;
+- calibration-only paired leave-one-modality-out importance estimation with
+  a validation-disjoint scientific scenario;
 - exact static and availability-conditioned small-silo service calibration;
 - checkpointable MICS-Core/Impact component queues and cardinality greedy;
 - a shared tracked FL runner for uniform and MICS selector comparisons;
@@ -43,13 +44,15 @@ Implemented and tested:
   matched system traces, client-round random streams, and held-out cases;
 - registered MICS-Core, no-queue, modular-utility, and uniform-importance
   ablations with a matched five-variant audit;
+- a frozen five-seed ablation protocol, resumable Slurm array, checkpoint-wise
+  full validation, and paired Student-t aggregate reporting;
 - CPU tests and an HPC GPU smoke-job template.
 
 Planned but not yet claimed as experimental evidence:
 
 - cached-update MICS-Diversity and knapsack-oracle extensions;
 - Oort and additional modality-aware comparison methods;
-- complete multi-seed journal experiments.
+- execution and review of the complete multi-seed journal experiments.
 
 ## Model architecture
 

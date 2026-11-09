@@ -42,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--system-trace", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path("results"))
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--study-id")
+    parser.add_argument("--protocol-manifest", type=Path)
     parser.add_argument("--rounds", type=int, default=150)
     parser.add_argument("--clients-per-round", type=int, default=2)
     parser.add_argument("--checkpoint-every", type=int, default=10)
@@ -85,9 +87,7 @@ def _file_sha256(path: Path) -> str:
 def _scenario_files(scenario: BraTSScenario) -> tuple[Path, ...]:
     files = [scenario.config_path, scenario.global_test_file]
     for client in scenario.clients:
-        files.extend(
-            (client.train_file, client.validation_file, client.test_file)
-        )
+        files.extend(client.split_file(name) for name in scenario.partitions)
     return tuple(files)
 
 
@@ -103,6 +103,15 @@ def _resolved_config(
             "integration_smoke_not_model_quality"
             if arguments.max_batches_per_epoch is not None
             else "full_training_checkpoint_for_held_out_evaluation"
+        ),
+        "study": (
+            None
+            if arguments.study_id is None
+            else {
+                "id": arguments.study_id,
+                "protocol_manifest": str(arguments.protocol_manifest.resolve()),
+                "protocol_sha256": _file_sha256(arguments.protocol_manifest),
+            }
         ),
         "scenario": {
             "id": scenario.scenario_id,
@@ -120,6 +129,7 @@ def _resolved_config(
                 client.client_id: {
                     "modalities": list(client.modalities),
                     "train_count": len(client.train_case_ids),
+                    "calibration_count": len(client.calibration_case_ids),
                     "validation_count": len(client.validation_case_ids),
                     "test_count": len(client.test_case_ids),
                 }
@@ -185,6 +195,15 @@ def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
         raise SystemExit("Batch size or worker count is invalid.")
     if min(arguments.model_seed, arguments.selection_seed, arguments.data_seed) < 0:
         raise SystemExit("Scientific seeds must be non-negative.")
+    if (arguments.study_id is None) != (arguments.protocol_manifest is None):
+        raise SystemExit(
+            "--study-id and --protocol-manifest must be supplied together."
+        )
+    if (
+        arguments.protocol_manifest is not None
+        and not arguments.protocol_manifest.is_file()
+    ):
+        raise SystemExit("Protocol manifest does not exist.")
     target_device = torch.device(arguments.device)
     if target_device.type == "cuda" and not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable; submit this runner through a GPU job.")

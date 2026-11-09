@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Estimate validation-only modality importance from a tracked checkpoint."""
+"""Estimate non-test modality importance from a tracked checkpoint."""
 
 from __future__ import annotations
 
@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scenario-config", type=Path)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--client", action="append")
+    parser.add_argument(
+        "--partition",
+        choices=("calibration", "validation"),
+        default="validation",
+    )
     parser.add_argument("--max-cases-per-client", type=int)
     parser.add_argument("--roi-size", type=int, nargs=3, default=(96, 96, 96))
     parser.add_argument("--overlap", type=float, default=0.5)
@@ -66,6 +71,7 @@ def main() -> None:
         loaded.model,
         loaded.scenario,
         arguments.dataset_root,
+        partition=arguments.partition,
         client_ids=arguments.client,
         max_cases_per_client=arguments.max_cases_per_client,
         region_weights=dict(zip(BRATS_REGIONS, arguments.region_weights)),
@@ -76,11 +82,15 @@ def main() -> None:
         amp=not arguments.no_amp,
     )
 
-    subset = not importance["complete_validation_probe"]
+    subset = not importance["complete_partition_probe"]
     purpose = (
         "integration_smoke_not_modality_importance"
         if subset
-        else "validation_derived_modality_importance"
+        else (
+            "selector_calibration_modality_importance"
+            if arguments.partition == "calibration"
+            else "validation_derived_modality_importance"
+        )
     )
     project_root = Path(__file__).resolve().parents[1]
     output = {
@@ -88,6 +98,7 @@ def main() -> None:
         "purpose": purpose,
         "run_id": loaded.run_dir.name,
         "completed_rounds": loaded.completed_rounds,
+        "study": loaded.resolved_config.get("study"),
         "checkpoint": {
             "path": str(loaded.checkpoint_path),
             "sha256": sha256_file(loaded.checkpoint_path),

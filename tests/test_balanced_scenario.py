@@ -13,9 +13,11 @@ import numpy as np
 
 from mics.data import (
     BRATS_BALANCED_PROFILE_SEED,
+    BRATS_CALIBRATION_SPLIT_SEED,
     BRATS_MODALITIES,
     balanced_brats_modalities,
     materialize_balanced_brats_scenario,
+    materialize_calibration_brats_scenario,
     validate_balanced_brats_modalities,
 )
 
@@ -55,19 +57,29 @@ class BalancedScenarioTests(unittest.TestCase):
             for client_index in range(1, 9):
                 client_id = f"C{client_index}"
                 files = {}
-                for partition in ("train", "validation", "test"):
-                    case_id = f"Case{case_index:03d}"
-                    case_index += 1
-                    np.save(
-                        dataset_root / "vol" / f"{case_id}.npy",
-                        np.zeros((1, 1, 1, 4), dtype=np.float32),
-                    )
-                    np.save(
-                        dataset_root / "seg" / f"{case_id}.npy",
-                        np.zeros((1, 1, 1), dtype=np.uint8),
-                    )
+                for partition, count in (
+                    ("train", 1),
+                    ("validation", 2),
+                    ("test", 1),
+                ):
                     split_file = source_dir / f"{client_id}_{partition}.csv"
-                    split_file.write_text(f"{case_id}\n", encoding="utf-8")
+                    case_ids = []
+                    for _ in range(count):
+                        case_id = f"Case{case_index:03d}"
+                        case_index += 1
+                        case_ids.append(case_id)
+                        np.save(
+                            dataset_root / "vol" / f"{case_id}.npy",
+                            np.zeros((1, 1, 1, 4), dtype=np.float32),
+                        )
+                        np.save(
+                            dataset_root / "seg" / f"{case_id}.npy",
+                            np.zeros((1, 1, 1), dtype=np.uint8),
+                        )
+                    split_file.write_text(
+                        "".join(f"{case_id}\n" for case_id in case_ids),
+                        encoding="utf-8",
+                    )
                     files[partition] = str(split_file)
                 clients[client_id] = {"files": files}
 
@@ -126,7 +138,7 @@ class BalancedScenarioTests(unittest.TestCase):
                 scenario.modality_pool_sizes,
                 {modality: 5 for modality in BRATS_MODALITIES},
             )
-            self.assertEqual(scenario.covered_case_count, 26)
+            self.assertEqual(scenario.covered_case_count, 34)
             self.assertEqual(
                 payload["source_scenario"]["mapping_fingerprint"],
                 "source-fingerprint",
@@ -136,6 +148,43 @@ class BalancedScenarioTests(unittest.TestCase):
                 payload["modality_profile"]["derived_independently_of_patient_data"]
             )
             self.assertTrue((output / "global_test.csv").is_file())
+
+            scientific_output = root / "balanced_calibration"
+            scientific = materialize_calibration_brats_scenario(
+                output / "materialized_config.json",
+                scientific_output,
+                dataset_root=dataset_root,
+                split_seed=BRATS_CALIBRATION_SPLIT_SEED,
+            )
+            repeated_output = root / "balanced_calibration_repeat"
+            repeated = materialize_calibration_brats_scenario(
+                output / "materialized_config.json",
+                repeated_output,
+                dataset_root=dataset_root,
+                split_seed=BRATS_CALIBRATION_SPLIT_SEED,
+            )
+
+            self.assertEqual(scientific.schema_version, 2)
+            self.assertEqual(
+                scientific.partition_counts,
+                {"train": 8, "calibration": 8, "validation": 8, "test": 8},
+            )
+            self.assertEqual(scientific.covered_case_count, 34)
+            for client in scientific.clients:
+                repeated_client = repeated.client(client.client_id)
+                self.assertEqual(
+                    client.calibration_case_ids,
+                    repeated_client.calibration_case_ids,
+                )
+                self.assertEqual(
+                    client.validation_case_ids,
+                    repeated_client.validation_case_ids,
+                )
+                self.assertFalse(
+                    set(client.calibration_case_ids).intersection(
+                        client.validation_case_ids
+                    )
+                )
 
 
 if __name__ == "__main__":

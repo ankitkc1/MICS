@@ -26,7 +26,7 @@ class FederatedEvaluationTests(unittest.TestCase):
         self.dataset_root = self.root / "dataset"
         (self.dataset_root / "vol").mkdir(parents=True)
         (self.dataset_root / "seg").mkdir()
-        for index in range(1, 9):
+        for index in range(1, 11):
             case_id = f"Case{index:03d}"
             volume = np.zeros((4, 4, 4, 4), dtype=np.float32)
             volume[..., index % 4] = 1.0
@@ -38,8 +38,18 @@ class FederatedEvaluationTests(unittest.TestCase):
         scenario_dir = self.root / "balanced"
         scenario_dir.mkdir()
         assignments = {
-            "C1": {"train": "Case001", "validation": "Case003", "test": "Case005"},
-            "C2": {"train": "Case002", "validation": "Case004", "test": "Case006"},
+            "C1": {
+                "train": "Case001",
+                "calibration": "Case003",
+                "validation": "Case005",
+                "test": "Case007",
+            },
+            "C2": {
+                "train": "Case002",
+                "calibration": "Case004",
+                "validation": "Case006",
+                "test": "Case008",
+            },
         }
         clients = {}
         for client_id, partitions in assignments.items():
@@ -50,12 +60,12 @@ class FederatedEvaluationTests(unittest.TestCase):
                 files[partition] = path.name
             clients[client_id] = {"files": files}
         global_test = scenario_dir / "global_test.csv"
-        global_test.write_text("Case007\nCase008\n", encoding="utf-8")
+        global_test.write_text("Case009\nCase010\n", encoding="utf-8")
         config = scenario_dir / "materialized_config.json"
         config.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "split_id": "balanced",
                     "data_seed": 1,
                     "modality_order": ["FLAIR", "T1ce", "T1", "T2"],
@@ -183,6 +193,31 @@ class FederatedEvaluationTests(unittest.TestCase):
 
         self.assertTrue(fallback)
         self.assertEqual(set(weights.values()), {0.25})
+
+    def test_calibration_importance_is_complete_and_disjoint(self) -> None:
+        result = estimate_leave_one_modality_out_importance(
+            self.model,
+            self.scenario,
+            self.dataset_root,
+            partition="calibration",
+            roi_size=(4, 4, 4),
+            device="cpu",
+            amp=False,
+        )
+
+        self.assertEqual(result["partition"], "calibration")
+        self.assertTrue(result["complete_partition_probe"])
+        self.assertTrue(result["complete_calibration_probe"])
+        self.assertFalse(result["complete_validation_probe"])
+        calibration_cases = {
+            record["case_id"] for record in result["baseline_evaluation"]["cases"]
+        }
+        validation_cases = {
+            case_id
+            for client in self.scenario.clients
+            for case_id in client.validation_case_ids
+        }
+        self.assertFalse(calibration_cases.intersection(validation_cases))
 
 
 if __name__ == "__main__":

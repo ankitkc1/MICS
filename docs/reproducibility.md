@@ -154,12 +154,12 @@ DivFL-style contracts.
 For leave-one-modality-out importance, record the checkpoint hash, scenario
 hash, eligible clients, native and ablated modality sets, paired case IDs,
 region weights, signed case and client effects, uncertainty, clipping and
-normalisation fallback, and exact probe cost. Importance estimation is
-validation-only. The estimator has no test-partition option, and the generated
-record must state that test data were not accessed. Once validation cases are
-used to calibrate the selector, their scores are not labelled as independent
-model-selection evidence; use a disjoint validation role if that evidence is
-needed.
+normalisation fallback, and exact probe cost. Scientific importance estimation
+uses the dedicated calibration partition. The estimator has no test-partition
+option, and the generated record must state that test data were not accessed.
+The schema-v2 scientific scenario keeps calibration cases disjoint from model
+validation, local-test, and global-test cases. Legacy schema-v1 validation
+probes remain supported only for smoke and retrospective development records.
 
 ## Suggested generated run layout
 

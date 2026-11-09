@@ -9,7 +9,9 @@ from .brats import (
     resolve_client_split_file,
 )
 from .scenario import (
+    BRATS_CALIBRATION_PARTITION,
     BRATS_PARTITIONS,
+    BRATS_SCIENTIFIC_PARTITIONS,
     BraTSClientScenario,
     BraTSScenario,
     build_brats_scenario_dataset,
@@ -21,13 +23,20 @@ from .profiles import (
     balanced_brats_modalities,
     validate_balanced_brats_modalities,
 )
-from .materialize import materialize_balanced_brats_scenario
+from .materialize import (
+    BRATS_CALIBRATION_SPLIT_SEED,
+    materialize_balanced_brats_scenario,
+    materialize_calibration_brats_scenario,
+)
 
 __all__ = [
     "BRATS_LABELS",
     "BRATS_MODALITIES",
+    "BRATS_CALIBRATION_PARTITION",
     "BRATS_PARTITIONS",
+    "BRATS_SCIENTIFIC_PARTITIONS",
     "BRATS_BALANCED_PROFILE_SEED",
+    "BRATS_CALIBRATION_SPLIT_SEED",
     "BraTSClientScenario",
     "BraTSNpyDataset",
     "BraTSScenario",
@@ -36,6 +45,7 @@ __all__ = [
     "balanced_brats_modalities",
     "load_brats_scenario",
     "materialize_balanced_brats_scenario",
+    "materialize_calibration_brats_scenario",
     "read_case_ids",
     "resolve_client_split_file",
     "validate_matched_brats_scenarios",

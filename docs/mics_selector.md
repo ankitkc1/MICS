@@ -7,7 +7,7 @@ update facility location or the knapsack extension.
 ## Fixed-round score
 
 For every modality `m`, the selector maintains a non-negative service-deficit
-queue `D[m]`. With an optional validation-derived importance vector `psi` and
+queue `D[m]`. With an optional calibration-derived importance vector `psi` and
 impact coefficient `V_I`, the effective component weight is
 
     W[m] = D[m] + V_I * psi[m].

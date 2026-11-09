@@ -63,10 +63,10 @@ macro-client, and sample-weighted reductions. Development never evaluates the
 local-test or global-test cases; those partitions are opened only after method
 and hyperparameter choices are frozen.
 
-## Validation-derived modality importance
+## Calibration-derived modality importance
 
 MICS estimates modality importance with paired leave-one-modality-out probes.
-For a validation case `i` held by client `k`, let `D[k,i,r](A[k])` be the Dice
+For a calibration case `i` held by client `k`, let `D[k,i,r](A[k])` be the Dice
 for region `r` under the client's native modality set `A[k]`. For every
 available modality `m` that can be removed without leaving an empty input,
 the signed case effect is
@@ -87,13 +87,11 @@ before normalisation. The signed estimate is never discarded. If all signed
 effects are non-positive, the implementation records an explicit fallback and
 uses uniform weights rather than inventing a ranking.
 
-These probes consume validation data as a selector/calibration input. Once
-used for this purpose, the same scores are not described as an independent
-generalisation estimate. Local-test and global-test partitions remain locked
-until the complete protocol, hyperparameters, checkpoint rule, importance
-refresh schedule, and target thresholds are frozen. If independent validation
-model selection is required, a disjoint selection-probe partition must be
-materialised before the main experiments.
+These probes consume only the dedicated selector-calibration partition. The
+model-validation cases are disjoint and remain eligible for checkpoint and
+convergence analysis. Local-test and global-test partitions remain locked until
+the complete protocol, hyperparameters, checkpoint rule, importance refresh
+schedule, and target thresholds are frozen.
 
 Probe cost is reported separately: native baseline case evaluations,
 additional modality-ablation evaluations, sliding-window count, inference and
@@ -112,7 +110,7 @@ improve the average while repeatedly excluding particular clients.
 ## MICS explanatory diagnostics
 
 - per-round modality coverage;
-- signed and normalised validation-derived modality importance;
+- signed and normalised calibration-derived modality importance;
 - impact-weighted modality coverage;
 - component update counts;
 - client and modality staleness;
@@ -154,7 +152,9 @@ probe cost separately from per-round selection costs.
 The MICS ablation matrix uses the same audit with full MICS-Impact as the
 reference. It reports MICS-Core, no-component-queue, modular-additive utility,
 and uniform-importance variants. These are one-factor mechanism tests and are
-not counted as additional external baselines.
+not counted as additional external baselines. The multi-seed aggregator reports
+sample standard deviation and a two-sided Student-t interval across the five
+fixed seeds, plus paired candidate-minus-MICS effects within each seed.
 
 Primary references:
 

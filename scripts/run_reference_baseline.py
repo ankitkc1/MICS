@@ -85,9 +85,7 @@ def _file_sha256(path: Path) -> str:
 def _scenario_files(scenario: BraTSScenario) -> tuple[Path, ...]:
     files = [scenario.config_path, scenario.global_test_file]
     for client in scenario.clients:
-        files.extend(
-            (client.train_file, client.validation_file, client.test_file)
-        )
+        files.extend(client.split_file(name) for name in scenario.partitions)
     return tuple(files)
 
 
@@ -164,6 +162,7 @@ def _resolved_config(
                 client.client_id: {
                     "modalities": list(client.modalities),
                     "train_count": len(client.train_case_ids),
+                    "calibration_count": len(client.calibration_case_ids),
                     "validation_count": len(client.validation_case_ids),
                     "test_count": len(client.test_case_ids),
                 }

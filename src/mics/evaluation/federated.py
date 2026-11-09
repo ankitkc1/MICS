@@ -103,9 +103,14 @@ def evaluate_brats_client_partition(
     """Evaluate held-out whole cases under each client's modality mask."""
 
     partition_name = str(partition).strip().lower()
-    if partition_name not in {"validation", "test"}:
+    if partition_name not in {"calibration", "validation", "test"}:
         raise ValueError(
-            "Whole-volume evaluation partition must be validation or test."
+            "Whole-volume evaluation partition must be calibration, "
+            "validation, or test."
+        )
+    if partition_name not in scenario.partitions:
+        raise ValueError(
+            f"Scenario {scenario.scenario_id!r} has no {partition_name} partition."
         )
     if max_cases_per_client is not None and max_cases_per_client <= 0:
         raise ValueError("max_cases_per_client must be positive when supplied.")

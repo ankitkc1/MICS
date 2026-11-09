@@ -18,7 +18,16 @@ class LoadedModalityImportance:
     purpose: str
     payload: dict[str, Any]
     weights: dict[str, float]
-    complete_validation_probe: bool
+    partition: str
+    complete_probe: bool
+
+    @property
+    def complete_validation_probe(self) -> bool:
+        return self.partition == "validation" and self.complete_probe
+
+    @property
+    def complete_calibration_probe(self) -> bool:
+        return self.partition == "calibration" and self.complete_probe
 
     def source_record(self) -> dict[str, Any]:
         importance = self.payload.get("importance", {})
@@ -27,8 +36,13 @@ class LoadedModalityImportance:
             "sha256": self.sha256,
             "purpose": self.purpose,
             "weights": dict(self.weights),
+            "partition": self.partition,
+            "complete_probe": self.complete_probe,
             "complete_validation_probe": self.complete_validation_probe,
+            "complete_calibration_probe": self.complete_calibration_probe,
             "checkpoint": self.payload.get("checkpoint"),
+            "study": self.payload.get("study"),
+            "scenario": self.payload.get("scenario"),
             "probe_cost": importance.get("probe_cost"),
             "test_data_accessed": importance.get("test_data_accessed"),
         }
@@ -39,7 +53,7 @@ def load_modality_importance_record(
     *,
     modalities: Sequence[str],
 ) -> LoadedModalityImportance:
-    """Load normalized selector weights only from a validation-only record."""
+    """Load normalized selector weights from a non-test calibration record."""
 
     resolved = Path(path).resolve()
     payload = read_json_object(resolved)
@@ -47,7 +61,7 @@ def load_modality_importance_record(
     if not isinstance(importance, dict):
         raise ValueError("Importance record has no importance object.")
     if importance.get("test_data_accessed") is not False:
-        raise ValueError("Importance record does not certify validation-only use.")
+        raise ValueError("Importance record does not certify non-test use.")
     raw_weights = importance.get("normalised_selection_weights")
     if not isinstance(raw_weights, dict):
         raise ValueError("Importance record has no normalized selection weights.")
@@ -63,13 +77,21 @@ def load_modality_importance_record(
     if not math.isclose(sum(weights.values()), 1.0, rel_tol=1e-7, abs_tol=1e-9):
         raise ValueError("Importance weights must sum to one.")
     purpose = str(payload.get("purpose", ""))
+    partition = str(importance.get("partition", "validation")).strip().lower()
+    if partition not in ("calibration", "validation"):
+        raise ValueError("Importance record has an invalid source partition.")
+    complete_probe = bool(
+        importance.get(
+            "complete_partition_probe",
+            importance.get("complete_validation_probe", False),
+        )
+    )
     return LoadedModalityImportance(
         path=resolved,
         sha256=sha256_file(resolved),
         purpose=purpose,
         payload=payload,
         weights={modality: weights[modality] for modality in expected},
-        complete_validation_probe=bool(
-            importance.get("complete_validation_probe", False)
-        ),
+        partition=partition,
+        complete_probe=complete_probe,
     )

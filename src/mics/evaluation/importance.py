@@ -111,6 +111,7 @@ def estimate_leave_one_modality_out_importance(
     dataset_root: str | Path,
     *,
     client_ids: Iterable[str] | None = None,
+    partition: str = "validation",
     max_cases_per_client: int | None = None,
     region_weights: Mapping[str, float] | None = None,
     epsilon: float = 1e-6,
@@ -120,15 +121,24 @@ def estimate_leave_one_modality_out_importance(
     amp: bool = True,
     spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> dict[str, Any]:
-    """Estimate modality effects from paired validation counterfactuals.
+    """Estimate modality effects from paired calibration counterfactuals.
 
-    For every eligible client and validation case, the method subtracts the
-    Dice obtained after removing one available modality from the Dice obtained
-    with the client's native modality set.  The primary effect is a macro-client
-    mean, preventing clients with larger validation partitions from dominating.
-    Test partitions are not accepted or opened by this API.
+    For every eligible client and case in the declared partition, the method
+    subtracts the Dice obtained after removing one available modality from the
+    Dice obtained with the client's native modality set. The primary effect is
+    a macro-client mean, preventing clients with larger calibration partitions
+    from dominating. Test partitions are not accepted or opened by this API.
     """
 
+    partition_name = str(partition).strip().lower()
+    if partition_name not in ("calibration", "validation"):
+        raise ValueError(
+            "Importance estimation permits only calibration or validation data."
+        )
+    if partition_name not in scenario.partitions:
+        raise ValueError(
+            f"Scenario {scenario.scenario_id!r} has no {partition_name} partition."
+        )
     weights = _normalise_region_weights(region_weights)
     selected_client_ids = (
         tuple(client.client_id for client in scenario.clients)
@@ -145,7 +155,7 @@ def estimate_leave_one_modality_out_importance(
         model,
         scenario,
         dataset_root,
-        partition="validation",
+        partition=partition_name,
         client_ids=None if client_ids is None else selected_client_ids,
         max_cases_per_client=max_cases_per_client,
         roi_size=roi_size,
@@ -190,7 +200,7 @@ def estimate_leave_one_modality_out_importance(
             model,
             scenario,
             dataset_root,
-            partition="validation",
+            partition=partition_name,
             client_ids=eligible,
             max_cases_per_client=max_cases_per_client,
             modality_overrides=overrides,
@@ -305,13 +315,18 @@ def estimate_leave_one_modality_out_importance(
     ablation_case_count = sum(
         int(value["case_count"]) for value in ablation_evaluations.values()
     )
+    complete_probe = client_ids is None and max_cases_per_client is None
     return {
         "schema_version": 1,
-        "method": "paired_leave_one_modality_out_validation_dice",
-        "partition": "validation",
+        "method": f"paired_leave_one_modality_out_{partition_name}_dice",
+        "partition": partition_name,
         "test_data_accessed": False,
+        "complete_partition_probe": complete_probe,
         "complete_validation_probe": (
-            client_ids is None and max_cases_per_client is None
+            complete_probe and partition_name == "validation"
+        ),
+        "complete_calibration_probe": (
+            complete_probe and partition_name == "calibration"
         ),
         "primary_reduction": "macro_client",
         "region_weights": weights,

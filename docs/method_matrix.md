@@ -32,8 +32,8 @@ training-update uploads. Power-of-Choice and DivFL therefore pay for the
 statistics used to choose clients. A model downloaded for a probe and reused
 for training in the same round is charged once.
 
-MICS uses a validation-derived modality-importance record created before the
-matched run. Its source checkpoint, checksum, cases, and one-time probe cost
+Scientific MICS runs use a calibration-derived modality-importance record
+created before the matched run. Its source checkpoint, checksum, cases, and one-time probe cost
 are disclosed as an external selector input. That cost is not silently folded
 into per-round communication or training time. A final paper should report
 both the one-time calibration cost and the amortized per-round cost.
@@ -48,6 +48,6 @@ run, materialize disjoint selector-calibration and model-validation roles and
 freeze all thresholds, seeds, checkpoints, and evaluation schedules.
 
 Run `hpc/slurm/four_method_matrix_smoke.slurm` after setting
-`MICS_IMPORTANCE_OUTPUT` to a completed validation-only importance JSON. The
+`MICS_IMPORTANCE_OUTPUT` to a completed non-test importance JSON. The
 job writes four immutable run directories, four evaluation records, the
 shared system trace, and one guarded method-matrix report under `results/`.
