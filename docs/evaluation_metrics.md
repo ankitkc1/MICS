@@ -151,6 +151,11 @@ clean common source revision and runtime environment, reports every method
 against the same reference, and discloses MICS's external modality-importance
 probe cost separately from per-round selection costs.
 
+The MICS ablation matrix uses the same audit with full MICS-Impact as the
+reference. It reports MICS-Core, no-component-queue, modular-additive utility,
+and uniform-importance variants. These are one-factor mechanism tests and are
+not counted as additional external baselines.
+
 Primary references:
 
 - Oort: https://www.usenix.org/conference/osdi21/presentation/lai

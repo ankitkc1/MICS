@@ -58,6 +58,20 @@ EVALUATION_INVARIANTS = (
     "case_count",
     "complete_partition",
 )
+SELECTION_DISCLOSURE_FIELDS = (
+    "name",
+    "variant",
+    "ablation",
+    "service_type",
+    "saturation_level",
+    "impact_weight",
+    "component_queue_weight",
+    "subset_utility",
+    "importance_mode",
+    "reliability_aware",
+    "candidate_size",
+    "probe_max_batches",
+)
 
 
 @dataclass(frozen=True)
@@ -255,6 +269,11 @@ def main() -> None:
             "selection_config_fingerprint": configuration_fingerprint(
                 selection_config
             ),
+            "selection_configuration": {
+                field: selection_config[field]
+                for field in SELECTION_DISCLOSURE_FIELDS
+                if field in selection_config
+            },
             "external_importance_source": (
                 selection_config.get("importance_source")
                 if isinstance(selection_config, Mapping)

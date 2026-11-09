@@ -14,6 +14,9 @@ from .base import ClientSelector, ClientState, SelectionContext, SelectionPlan
 PURE_COVERAGE = "pure_coverage"
 TRUNCATED_LINEAR = "truncated_linear"
 MICS_SERVICE_TYPES = (PURE_COVERAGE, TRUNCATED_LINEAR)
+SUBMODULAR_SERVICE = "submodular_service"
+MODULAR_ADDITIVE = "modular_additive"
+MICS_SUBSET_UTILITIES = (SUBMODULAR_SERVICE, MODULAR_ADDITIVE)
 
 
 def _finite_nonnegative_mapping(
@@ -632,6 +635,8 @@ class MICSSelector(ClientSelector):
         service_type: str = PURE_COVERAGE,
         saturation_levels: Mapping[str, int] | None = None,
         impact_weight: float = 0.0,
+        component_queue_weight: float = 1.0,
+        subset_utility: str = SUBMODULAR_SERVICE,
         client_targets: Mapping[str, float] | None = None,
         reliability_aware: bool = True,
         beta_prior_success: float = 1.0,
@@ -669,6 +674,19 @@ class MICSSelector(ClientSelector):
         self.impact_weight = float(impact_weight)
         if not math.isfinite(self.impact_weight) or self.impact_weight < 0.0:
             raise ValueError("impact_weight must be finite and non-negative.")
+        self.component_queue_weight = float(component_queue_weight)
+        if (
+            not math.isfinite(self.component_queue_weight)
+            or self.component_queue_weight < 0.0
+        ):
+            raise ValueError(
+                "component_queue_weight must be finite and non-negative."
+            )
+        if subset_utility not in MICS_SUBSET_UTILITIES:
+            raise ValueError(
+                f"subset_utility must be one of {MICS_SUBSET_UTILITIES}."
+            )
+        self.subset_utility = subset_utility
         self.client_targets = _finite_nonnegative_mapping(
             client_targets or {},
             name="client_targets",
@@ -787,23 +805,28 @@ class MICSSelector(ClientSelector):
         effective_weights = {}
         component_terms = {}
         for modality in self.modalities:
-            contributors = (
+            contributors = tuple(
                 probabilities[client_id]
                 for client_id in selected
                 if modality in clients[client_id].modalities
             )
-            service = expected_component_service(
-                contributors,
-                service_type=self.service_type,
-                saturation_level=self.saturation_levels[modality],
+            component_utility = (
+                expected_component_service(
+                    contributors,
+                    service_type=self.service_type,
+                    saturation_level=self.saturation_levels[modality],
+                )
+                if self.subset_utility == SUBMODULAR_SERVICE
+                else sum(contributors)
             )
             weight = (
-                self._component_queues[modality]
+                self.component_queue_weight
+                * self._component_queues[modality]
                 + self.impact_weight * impact[modality]
             )
-            expected_service[modality] = service
+            expected_service[modality] = component_utility
             effective_weights[modality] = weight
-            component_terms[modality] = weight * service
+            component_terms[modality] = weight * component_utility
         client_terms = {
             client_id: self._client_queues.get(client_id, 0.0)
             * probabilities[client_id]
@@ -817,6 +840,7 @@ class MICSSelector(ClientSelector):
             "component_total": float(component_total),
             "client_queue_total": float(client_total),
             "expected_component_service": expected_service,
+            "subset_utility": self.subset_utility,
             "effective_component_weights": effective_weights,
             "component_terms": component_terms,
             "client_queue_terms": client_terms,
@@ -932,6 +956,8 @@ class MICSSelector(ClientSelector):
                 "service_targets": dict(self.service_targets),
                 "saturation_levels": dict(self.saturation_levels),
                 "impact_weight": self.impact_weight,
+                "component_queue_weight": self.component_queue_weight,
+                "subset_utility": self.subset_utility,
                 "component_importance": impact,
                 "component_queues_before_round": dict(self._component_queues),
                 "client_queues_before_round": dict(self._client_queues),

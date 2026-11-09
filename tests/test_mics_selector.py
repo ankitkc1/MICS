@@ -8,7 +8,9 @@ import unittest
 
 from mics import ClientState, MICSSelector, SelectionContext
 from mics.selection import (
+    MODULAR_ADDITIVE,
     PURE_COVERAGE,
+    SUBMODULAR_SERVICE,
     TRUNCATED_LINEAR,
     calibrate_availability_aware_service_targets,
     calibrate_static_service_targets,
@@ -163,10 +165,15 @@ class MICSSelectorTests(unittest.TestCase):
             impact_weight=1.0,
             reliability_aware=True,
         )
-        round_context = context(
-            0,
+        round_context = SelectionContext(
+            round_index=0,
             budget=2,
-            importance={"m1": 0.6, "m2": 0.4},
+            clients=(
+                ClientState("A", {"m1"}, 10),
+                ClientState("B", {"m1"}, 10),
+                ClientState("C", {"m2"}, 10),
+            ),
+            component_importance={"m1": 0.6, "m2": 0.4},
         )
         client_ids = ("A", "B", "C")
         values = {
@@ -254,6 +261,93 @@ class MICSSelectorTests(unittest.TestCase):
         second = selector.plan_round(second_context)
         expected_client = "C" if other_modality == "m2" else "A"
         self.assertEqual(second.selected_client_ids, (expected_client,))
+
+    def test_modular_ablation_counts_overlapping_contributions_twice(
+        self,
+    ) -> None:
+        round_context = context(
+            0,
+            budget=2,
+            importance={"m1": 0.6, "m2": 0.4},
+        )
+        submodular = MICSSelector(
+            {"m1": 0.0, "m2": 0.0},
+            seed=31,
+            impact_weight=1.0,
+            component_queue_weight=0.0,
+            subset_utility=SUBMODULAR_SERVICE,
+            reliability_aware=False,
+        )
+        modular = MICSSelector(
+            {"m1": 0.0, "m2": 0.0},
+            seed=31,
+            impact_weight=1.0,
+            component_queue_weight=0.0,
+            subset_utility=MODULAR_ADDITIVE,
+            reliability_aware=False,
+        )
+
+        submodular_plan = submodular.plan_round(round_context)
+        modular_plan = modular.plan_round(round_context)
+
+        self.assertIn("C", submodular_plan.selected_client_ids)
+        self.assertEqual(
+            len({"A", "B"}.intersection(submodular_plan.selected_client_ids)),
+            1,
+        )
+        self.assertEqual(set(modular_plan.selected_client_ids), {"A", "B"})
+        self.assertEqual(
+            modular_plan.metadata["subset_utility"],
+            MODULAR_ADDITIVE,
+        )
+
+    def test_no_queue_ablation_ignores_accumulated_component_deficit(
+        self,
+    ) -> None:
+        full = MICSSelector(
+            {"m1": 1.0, "m2": 1.0},
+            seed=13,
+            impact_weight=1.0,
+            component_queue_weight=1.0,
+            reliability_aware=False,
+        )
+        no_queue = MICSSelector(
+            {"m1": 1.0, "m2": 1.0},
+            seed=13,
+            impact_weight=1.0,
+            component_queue_weight=0.0,
+            reliability_aware=False,
+        )
+        clients = (
+            ClientState("A", {"m1"}, 10),
+            ClientState("C", {"m2"}, 10),
+        )
+        first_context = SelectionContext(
+            round_index=0,
+            budget=1,
+            clients=clients,
+            component_importance={"m1": 0.9, "m2": 0.1},
+        )
+        for selector in (full, no_queue):
+            plan = selector.plan_round(first_context)
+            self.assertEqual(plan.selected_client_ids, ("A",))
+            selector.observe_round(
+                0,
+                selected_client_ids=plan.selected_client_ids,
+                successful_client_ids=plan.selected_client_ids,
+            )
+
+        second_context = SelectionContext(
+            round_index=1,
+            budget=1,
+            clients=clients,
+            component_importance={"m1": 0.9, "m2": 0.1},
+        )
+        self.assertEqual(full.plan_round(second_context).selected_client_ids, ("C",))
+        self.assertEqual(
+            no_queue.plan_round(second_context).selected_client_ids,
+            ("A",),
+        )
 
     def test_state_round_trip_preserves_next_tie_break(self) -> None:
         original = MICSSelector(

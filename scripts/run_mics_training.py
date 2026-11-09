@@ -28,12 +28,21 @@ from mics.experiments import (
     sha256_file,
 )
 from mics.selection import (
+    MODULAR_ADDITIVE,
     MICS_SERVICE_TYPES,
     PURE_COVERAGE,
+    SUBMODULAR_SERVICE,
     calibrate_availability_aware_service_targets,
     calibrate_static_service_targets,
 )
 from mics.training import LocalTrainingConfig
+
+MICS_ABLATIONS = (
+    "none",
+    "no_component_queue",
+    "modular_additive",
+    "uniform_importance",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--saturation-level", type=int, default=1)
     parser.add_argument("--safety-margin", type=float, default=0.1)
     parser.add_argument("--impact-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--ablation",
+        choices=MICS_ABLATIONS,
+        default="none",
+    )
     parser.add_argument("--reliability-aware", action="store_true")
     parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--num-levels", type=int, default=4)
@@ -110,7 +124,17 @@ def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
     if not math.isfinite(arguments.impact_weight) or arguments.impact_weight < 0.0:
         raise SystemExit("Impact weight must be finite and non-negative.")
     if arguments.impact_weight > 0.0 and arguments.importance_output is None:
-        raise SystemExit("MICS-Impact requires --importance-output.")
+        if arguments.ablation != "uniform_importance":
+            raise SystemExit("MICS-Impact requires --importance-output.")
+    if arguments.impact_weight == 0.0 and arguments.ablation != "none":
+        raise SystemExit("MICS-Core cannot be combined with an ablation flag.")
+    if (
+        arguments.ablation == "uniform_importance"
+        and arguments.importance_output is not None
+    ):
+        raise SystemExit(
+            "Uniform-importance ablation must not receive importance output."
+        )
     if arguments.batch_size <= 0 or arguments.num_workers < 0:
         raise SystemExit("Batch size or worker count is invalid.")
     if min(arguments.model_seed, arguments.selection_seed, arguments.data_seed) < 0:
@@ -130,6 +154,8 @@ def _load_importance(
                 "Do not pass --importance-output when --impact-weight is zero."
             )
         return None
+    if arguments.ablation == "uniform_importance":
+        return None
     loaded = load_modality_importance_record(
         arguments.importance_output,
         modalities=BRATS_MODALITIES,
@@ -147,11 +173,29 @@ def _resolved_config(
     arguments: argparse.Namespace,
     scenario: BraTSScenario,
     importance: LoadedModalityImportance | None,
+    component_importance: Mapping[str, float],
     calibration: Mapping[str, Any],
     system_trace: SystemTrace | None,
 ) -> dict[str, Any]:
     is_smoke = arguments.max_batches_per_epoch is not None
-    method = "mics_core" if arguments.impact_weight == 0.0 else "mics_impact"
+    method = _method_name(arguments)
+    component_queue_weight = (
+        0.0 if arguments.ablation == "no_component_queue" else 1.0
+    )
+    subset_utility = (
+        MODULAR_ADDITIVE
+        if arguments.ablation == "modular_additive"
+        else SUBMODULAR_SERVICE
+    )
+    importance_mode = (
+        "none"
+        if arguments.impact_weight == 0.0
+        else (
+            "uniform"
+            if arguments.ablation == "uniform_importance"
+            else "validation_derived"
+        )
+    )
     return {
         "schema_version": 1,
         "method": method,
@@ -200,6 +244,11 @@ def _resolved_config(
             "service_type": arguments.service_type,
             "saturation_level": arguments.saturation_level,
             "impact_weight": arguments.impact_weight,
+            "ablation": arguments.ablation,
+            "component_queue_weight": component_queue_weight,
+            "subset_utility": subset_utility,
+            "importance_mode": importance_mode,
+            "component_importance": dict(component_importance),
             "importance_source": (
                 None if importance is None else importance.source_record()
             ),
@@ -246,6 +295,17 @@ def _resolved_config(
     }
 
 
+def _method_name(arguments: argparse.Namespace) -> str:
+    if arguments.impact_weight == 0.0:
+        return "mics_core"
+    return {
+        "none": "mics_impact",
+        "no_component_queue": "mics_impact_no_queue",
+        "modular_additive": "mics_impact_modular",
+        "uniform_importance": "mics_impact_uniform",
+    }[arguments.ablation]
+
+
 def main() -> None:
     arguments = build_parser().parse_args()
     target_device = _validate_arguments(arguments)
@@ -261,6 +321,18 @@ def main() -> None:
         else load_system_trace(arguments.system_trace)
     )
     importance = _load_importance(arguments)
+    component_importance = (
+        {}
+        if arguments.impact_weight == 0.0
+        else (
+            {
+                modality: 1.0 / len(BRATS_MODALITIES)
+                for modality in BRATS_MODALITIES
+            }
+            if arguments.ablation == "uniform_importance"
+            else dict(importance.weights)
+        )
+    )
     levels = {
         modality: arguments.saturation_level for modality in BRATS_MODALITIES
     }
@@ -312,6 +384,7 @@ def main() -> None:
         arguments,
         scenario,
         importance,
+        component_importance,
         calibration.as_dict(),
         system_trace,
     )
@@ -329,6 +402,14 @@ def main() -> None:
         service_type=arguments.service_type,
         saturation_levels=levels,
         impact_weight=arguments.impact_weight,
+        component_queue_weight=(
+            0.0 if arguments.ablation == "no_component_queue" else 1.0
+        ),
+        subset_utility=(
+            MODULAR_ADDITIVE
+            if arguments.ablation == "modular_additive"
+            else SUBMODULAR_SERVICE
+        ),
         reliability_aware=arguments.reliability_aware,
     )
     training = LocalTrainingConfig(
@@ -367,9 +448,7 @@ def main() -> None:
         selector,
         training,
         loop,
-        component_importance=(
-            {} if importance is None else importance.weights
-        ),
+        component_importance=component_importance,
         system_trace=system_trace,
         resume=arguments.resume,
     )

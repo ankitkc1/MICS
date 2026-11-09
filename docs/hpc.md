@@ -173,6 +173,24 @@ evaluates the same validation case for every client; and produces one guarded
 matrix report. The report must remain marked as ineligible for scientific
 interpretation because training and validation are truncated.
 
+Once the four-method path passes, validate the registered MICS ablations:
+
+    export MICS_IMPORTANCE_OUTPUT=/absolute/path/to/modality_importance.json
+    JOB_ID=$(sbatch --parsable hpc/slurm/mics_ablation_matrix_smoke.slurm)
+    echo "JOB_ID=$JOB_ID"
+
+Inspect the ablation job and its guarded report:
+
+    sacct -j "$JOB_ID" --allocations \
+      --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS,ReqMem
+    cat "mics-ablation-${JOB_ID}.out"
+    cat "mics-ablation-${JOB_ID}.err"
+    cat "results/mics-ablation-matrix-smoke-${JOB_ID}.json"
+
+This job holds the trace, model, training, and cases fixed while separately
+removing learned importance, queue feedback, or diminishing returns, and while
+replacing learned importance with uniform component weights.
+
 Full training retains `last.pt` every round and archives a checkpoint every ten
 rounds, plus the final round. Full validation uses all 48 validation cases at
 those preregistered checkpoints. Local-test and global-test evaluation remain
