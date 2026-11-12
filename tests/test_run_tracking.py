@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,6 +79,96 @@ class RunRecorderTests(unittest.TestCase):
                 resolved_config=self.config,
                 runtime_metadata=self.metadata,
             )
+
+    def test_archive_collision_does_not_replace_last_checkpoint(self) -> None:
+        recorder = RunRecorder(
+            self.root,
+            "run-1",
+            resolved_config=self.config,
+            runtime_metadata=self.metadata,
+        )
+        recorder.save_checkpoint(
+            {
+                "config_fingerprint": recorder.config_fingerprint,
+                "next_round": 1,
+            },
+            archive_completed_rounds=1,
+        )
+        recorder.save_checkpoint(
+            {
+                "config_fingerprint": recorder.config_fingerprint,
+                "next_round": 2,
+            }
+        )
+
+        with self.assertRaises(FileExistsError):
+            recorder.save_checkpoint(
+                {
+                    "config_fingerprint": recorder.config_fingerprint,
+                    "next_round": 1,
+                },
+                archive_completed_rounds=1,
+            )
+
+        self.assertEqual(recorder.load_checkpoint()["next_round"], 2)
+
+    def test_resume_recovers_latest_archive_and_trims_ahead_logs(self) -> None:
+        recorder = RunRecorder(
+            self.root,
+            "run-1",
+            resolved_config=self.config,
+            runtime_metadata=self.metadata,
+        )
+        for round_index in range(4):
+            recorder.record_selection(
+                {"round": round_index, "selected_clients": ["C1"]}
+            )
+            recorder.record_round({"round": round_index, "loss": 1.0})
+            recorder.save_checkpoint(
+                {
+                    "config_fingerprint": recorder.config_fingerprint,
+                    "next_round": round_index + 1,
+                },
+                archive_completed_rounds=(
+                    round_index + 1
+                    if round_index + 1 in (2, 4)
+                    else None
+                ),
+            )
+        shutil.copyfile(
+            recorder.checkpoint_dir / "after_round_0002.pt",
+            recorder.checkpoint_path,
+        )
+        recorder.record_selection({"round": 1, "selected_clients": ["C2"]})
+        recorder.record_round({"round": 1, "loss": 2.0})
+        recorder.mark_failed(next_round=1, error="simulated stale resume")
+
+        recovered = RunRecorder(
+            self.root,
+            "run-1",
+            resolved_config=self.config,
+            runtime_metadata=self.metadata,
+            resume=True,
+        )
+
+        self.assertEqual(recovered.load_checkpoint()["next_round"], 4)
+        for path in (recovered.selection_path, recovered.metrics_path):
+            records = [
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(
+                [record["round"] for record in records],
+                [0, 1, 2, 3],
+            )
+        recovery_records = [
+            json.loads(line)
+            for line in recovered.recovery_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        self.assertEqual(recovery_records[-1]["next_round"], 4)
+        self.assertTrue((recovered.run_dir / "recovery_backups").is_dir())
         with self.assertRaisesRegex(ValueError, "configuration"):
             RunRecorder(
                 self.root,

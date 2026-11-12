@@ -140,9 +140,11 @@ class RunRecorder:
         self.selection_path = self.run_dir / "selection_history.jsonl"
         self.metrics_path = self.run_dir / "round_metrics.jsonl"
         self.status_path = self.run_dir / "status.json"
+        self.recovery_path = self.run_dir / "resume_recovery.jsonl"
         self.checkpoint_dir = self.run_dir / "checkpoints"
         self.checkpoint_path = self.checkpoint_dir / "last.pt"
         requested_fingerprint = _config_fingerprint(resolved_config)
+        self.config_fingerprint = requested_fingerprint
 
         if self.run_dir.exists():
             if not resume:
@@ -165,6 +167,7 @@ class RunRecorder:
             status = self.read_status()
             if status.get("state") == "completed":
                 raise ValueError("A completed run cannot be resumed.")
+            self._recover_resume_state()
         else:
             if resume:
                 raise FileNotFoundError(f"Run does not exist: {self.run_dir}")
@@ -172,8 +175,6 @@ class RunRecorder:
             _atomic_json(self.config_path, resolved_config)
             _atomic_json(self.metadata_path, runtime_metadata)
             self._write_status("initialized", next_round=0)
-
-        self.config_fingerprint = requested_fingerprint
 
     def _write_status(
         self,
@@ -215,6 +216,158 @@ class RunRecorder:
             handle.flush()
             os.fsync(handle.fileno())
 
+    @staticmethod
+    def _checkpoint_mapping(path: Path) -> dict[str, Any]:
+        value = torch.load(path, map_location="cpu", weights_only=False)
+        if not isinstance(value, dict):
+            raise ValueError(f"Checkpoint must contain a mapping: {path}")
+        return value
+
+    def _validated_checkpoint_round(self, path: Path) -> int:
+        value = self._checkpoint_mapping(path)
+        if value.get("config_fingerprint") != self.config_fingerprint:
+            raise ValueError(
+                f"Checkpoint configuration fingerprint does not match: {path}"
+            )
+        next_round = int(value.get("next_round", -1))
+        if next_round < 0:
+            raise ValueError(f"Checkpoint has an invalid next_round: {path}")
+        if path.name.startswith("after_round_"):
+            try:
+                declared_round = int(path.stem.removeprefix("after_round_"))
+            except ValueError as error:
+                raise ValueError(
+                    f"Archived checkpoint has an invalid filename: {path}"
+                ) from error
+            if declared_round != next_round:
+                raise ValueError(
+                    "Archived checkpoint filename and state disagree: "
+                    f"{path} records next_round={next_round}."
+                )
+        return next_round
+
+    def _backup_file(self, path: Path) -> Path:
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()[:16]
+        backup_directory = self.run_dir / "recovery_backups"
+        backup_directory.mkdir(exist_ok=True)
+        backup = backup_directory / f"{path.name}.{digest}.bak"
+        if not backup.exists():
+            temporary = backup.with_name(f".{backup.name}.tmp")
+            with temporary.open("wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, backup)
+        return backup
+
+    def _replace_last_checkpoint(self, source: Path) -> tuple[Path, Path]:
+        backup = self._backup_file(self.checkpoint_path)
+        temporary = self.checkpoint_dir / ".last.pt.recovery.tmp"
+        shutil.copyfile(source, temporary)
+        with temporary.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, self.checkpoint_path)
+        return backup, source
+
+    def _reconcile_round_log(
+        self,
+        path: Path,
+        *,
+        next_round: int,
+    ) -> dict[str, Any] | None:
+        if not path.exists():
+            if next_round == 0:
+                return None
+            raise FileNotFoundError(
+                f"Checkpoint expects {next_round} rounds but log is absent: {path}"
+            )
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+        if len(raw_lines) < next_round:
+            raise ValueError(
+                f"Checkpoint expects {next_round} rounds but {path.name} has "
+                f"only {len(raw_lines)} records."
+            )
+        for expected_round, line in enumerate(raw_lines[:next_round]):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"Invalid JSON in {path.name} record {expected_round}."
+                ) from error
+            if not isinstance(record, dict) or int(record.get("round", -1)) != (
+                expected_round
+            ):
+                raise ValueError(
+                    f"{path.name} is not consecutive at record {expected_round}."
+                )
+        if len(raw_lines) == next_round:
+            return None
+        backup = self._backup_file(path)
+        kept = raw_lines[:next_round]
+        temporary = path.with_name(f".{path.name}.recovery.tmp")
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            if kept:
+                handle.write("\n".join(kept) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        return {
+            "path": str(path),
+            "backup": str(backup),
+            "records_before": len(raw_lines),
+            "records_after": next_round,
+        }
+
+    def _recover_resume_state(self) -> None:
+        checkpoint_candidates = [
+            self.checkpoint_path,
+            *sorted(self.checkpoint_dir.glob("after_round_*.pt")),
+        ]
+        rounds = {
+            path: self._validated_checkpoint_round(path)
+            for path in checkpoint_candidates
+        }
+        selected = max(
+            checkpoint_candidates,
+            key=lambda path: (
+                rounds[path],
+                int(path != self.checkpoint_path),
+            ),
+        )
+        recovered_round = rounds[selected]
+        actions: dict[str, Any] = {}
+        if selected != self.checkpoint_path:
+            backup, source = self._replace_last_checkpoint(selected)
+            actions["checkpoint"] = {
+                "stale_last_next_round": rounds[self.checkpoint_path],
+                "recovered_next_round": recovered_round,
+                "source": str(source),
+                "backup": str(backup),
+            }
+        log_actions = tuple(
+            action
+            for path in (self.selection_path, self.metrics_path)
+            if (
+                action := self._reconcile_round_log(
+                    path,
+                    next_round=recovered_round,
+                )
+            )
+            is not None
+        )
+        if log_actions:
+            actions["logs"] = list(log_actions)
+        if actions:
+            self._append_jsonl(
+                self.recovery_path,
+                {
+                    "recovered_utc": _utc_now(),
+                    "next_round": recovered_round,
+                    **actions,
+                },
+            )
+
     def mark_running(self, *, next_round: int) -> None:
         self._write_status("running", next_round=next_round)
 
@@ -230,18 +383,22 @@ class RunRecorder:
         *,
         archive_completed_rounds: int | None = None,
     ) -> Path | None:
+        archive = None
+        if archive_completed_rounds is not None:
+            if archive_completed_rounds <= 0:
+                raise ValueError("archive_completed_rounds must be positive.")
+            archive = self.checkpoint_dir / (
+                f"after_round_{archive_completed_rounds:04d}.pt"
+            )
+            if archive.exists():
+                raise FileExistsError(
+                    f"Archived checkpoint already exists: {archive}"
+                )
         temporary = self.checkpoint_dir / ".last.pt.tmp"
         torch.save(checkpoint, temporary)
         os.replace(temporary, self.checkpoint_path)
-        if archive_completed_rounds is None:
+        if archive is None:
             return None
-        if archive_completed_rounds <= 0:
-            raise ValueError("archive_completed_rounds must be positive.")
-        archive = self.checkpoint_dir / (
-            f"after_round_{archive_completed_rounds:04d}.pt"
-        )
-        if archive.exists():
-            raise FileExistsError(f"Archived checkpoint already exists: {archive}")
         archive_temporary = self.checkpoint_dir / f".{archive.name}.tmp"
         shutil.copyfile(self.checkpoint_path, archive_temporary)
         with archive_temporary.open("rb+") as handle:
@@ -250,13 +407,7 @@ class RunRecorder:
         return archive
 
     def load_checkpoint(self) -> dict[str, Any]:
-        value = torch.load(
-            self.checkpoint_path,
-            map_location="cpu",
-            weights_only=False,
-        )
-        if not isinstance(value, dict):
-            raise ValueError("Checkpoint must contain a mapping.")
+        value = self._checkpoint_mapping(self.checkpoint_path)
         if value.get("config_fingerprint") != self.config_fingerprint:
             raise ValueError("Checkpoint configuration fingerprint does not match.")
         return value
