@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+from mics.experiments import generate_system_trace
+
 
 def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
     dataset_root = root / "dataset"
@@ -103,6 +105,79 @@ def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
 
 
 class MicsAblationRunnerTests(unittest.TestCase):
+    def test_v2_selector_preflight_records_calibration_and_inputs(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+            root = Path(temporary)
+            dataset_root, scenario_config, importance = _write_fixture(root)
+            trace = generate_system_trace(
+                ("C1", "C2"),
+                rounds=8,
+                seed=19,
+                availability_probabilities={"C1": 1.0, "C2": 1.0},
+                completion_probabilities={"C1": 1.0, "C2": 1.0},
+                minimum_available_clients=2,
+                trace_id="v2-preflight-fixture",
+            )
+            trace_path = root / "trace.json"
+            trace_path.write_text(
+                json.dumps(trace.as_dict()),
+                encoding="utf-8",
+            )
+            output = root / "preflight.json"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(project_root / "src")
+            result = subprocess.run(
+                (
+                    sys.executable,
+                    str(
+                        project_root
+                        / "scripts"
+                        / "simulate_mics_v2_selector.py"
+                    ),
+                    "--dataset-root",
+                    str(dataset_root),
+                    "--scenario-config",
+                    str(scenario_config),
+                    "--system-trace",
+                    str(trace_path),
+                    "--importance-output",
+                    str(importance),
+                    "--budget",
+                    "1",
+                    "--source-revision",
+                    "fixture-revision",
+                    "--output",
+                    str(output),
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                self.fail(
+                    "MICS-v2 selector preflight failed:\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["source_revision"], "fixture-revision")
+            self.assertEqual(
+                set(payload["methods"]),
+                {
+                    "mics_v2_impact",
+                    "mics_v2_core",
+                    "mics_v2_impact_no_client_queue",
+                },
+            )
+            self.assertEqual(set(payload["client_targets"]), {"C1", "C2"})
+            self.assertIn("clients", payload["calibration"])
+            self.assertIsNotNone(
+                payload["inputs"]["system_trace"]["sha256"]
+            )
+
     def test_registered_ablation_variants_write_distinct_provenance(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
@@ -119,6 +194,8 @@ class MicsAblationRunnerTests(unittest.TestCase):
                     1.0,
                     "submodular_service",
                     "none",
+                    "v1",
+                    False,
                 ),
                 (
                     "no-queue",
@@ -132,6 +209,8 @@ class MicsAblationRunnerTests(unittest.TestCase):
                     0.0,
                     "submodular_service",
                     "validation_derived",
+                    "v1",
+                    False,
                 ),
                 (
                     "modular",
@@ -145,6 +224,8 @@ class MicsAblationRunnerTests(unittest.TestCase):
                     1.0,
                     "modular_additive",
                     "validation_derived",
+                    "v1",
+                    False,
                 ),
                 (
                     "uniform",
@@ -153,6 +234,50 @@ class MicsAblationRunnerTests(unittest.TestCase):
                     1.0,
                     "submodular_service",
                     "uniform",
+                    "v1",
+                    False,
+                ),
+                (
+                    "v2-impact",
+                    (
+                        "--framework-version",
+                        "v2",
+                        "--importance-output",
+                        str(importance),
+                    ),
+                    "mics_v2_impact",
+                    1.0,
+                    "submodular_service",
+                    "validation_derived",
+                    "v2",
+                    True,
+                ),
+                (
+                    "v2-core",
+                    ("--framework-version", "v2", "--impact-weight", "0"),
+                    "mics_v2_core",
+                    1.0,
+                    "submodular_service",
+                    "none",
+                    "v2",
+                    True,
+                ),
+                (
+                    "v2-no-client-queue",
+                    (
+                        "--framework-version",
+                        "v2",
+                        "--importance-output",
+                        str(importance),
+                        "--ablation",
+                        "no_client_queue",
+                    ),
+                    "mics_v2_impact_no_client_queue",
+                    1.0,
+                    "submodular_service",
+                    "validation_derived",
+                    "v2",
+                    False,
                 ),
             )
             for (
@@ -162,6 +287,8 @@ class MicsAblationRunnerTests(unittest.TestCase):
                 expected_queue_weight,
                 expected_subset_utility,
                 expected_importance_mode,
+                expected_framework_version,
+                expected_client_queue,
             ) in variants:
                 with self.subTest(run_id=run_id):
                     command = (
@@ -234,6 +361,27 @@ class MicsAblationRunnerTests(unittest.TestCase):
                         selection["importance_mode"],
                         expected_importance_mode,
                     )
+                    self.assertEqual(
+                        selection["framework_version"],
+                        expected_framework_version,
+                    )
+                    self.assertEqual(
+                        selection["client_queue_enabled"],
+                        expected_client_queue,
+                    )
+                    if expected_client_queue:
+                        self.assertEqual(
+                            set(selection["client_targets"]),
+                            {"C1", "C2"},
+                        )
+                        self.assertIsNotNone(
+                            selection["client_target_calibration"]
+                        )
+                    else:
+                        self.assertEqual(selection["client_targets"], {})
+                        self.assertIsNone(
+                            selection["client_target_calibration"]
+                        )
                     self.assertTrue(
                         (run_dir / "checkpoints" / "last.pt").is_file()
                     )

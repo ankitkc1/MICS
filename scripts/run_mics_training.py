@@ -32,17 +32,21 @@ from mics.selection import (
     MICS_SERVICE_TYPES,
     PURE_COVERAGE,
     SUBMODULAR_SERVICE,
+    calibrate_availability_aware_client_targets,
     calibrate_availability_aware_service_targets,
+    calibrate_static_client_targets,
     calibrate_static_service_targets,
 )
 from mics.training import LocalTrainingConfig
 
 MICS_ABLATIONS = (
     "none",
+    "no_client_queue",
     "no_component_queue",
     "modular_additive",
     "uniform_importance",
 )
+MICS_FRAMEWORK_VERSIONS = ("v1", "v2")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--saturation-level", type=int, default=1)
     parser.add_argument("--safety-margin", type=float, default=0.1)
     parser.add_argument("--impact-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--framework-version",
+        choices=MICS_FRAMEWORK_VERSIONS,
+        default="v1",
+    )
     parser.add_argument(
         "--ablation",
         choices=MICS_ABLATIONS,
@@ -130,6 +139,11 @@ def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
             raise SystemExit("MICS-Impact requires --importance-output.")
     if arguments.impact_weight == 0.0 and arguments.ablation != "none":
         raise SystemExit("MICS-Core cannot be combined with an ablation flag.")
+    if (
+        arguments.ablation == "no_client_queue"
+        and arguments.framework_version != "v2"
+    ):
+        raise SystemExit("The no-client-queue ablation is defined only for MICS-v2.")
     if (
         arguments.ablation == "uniform_importance"
         and arguments.importance_output is not None
@@ -199,7 +213,9 @@ def _resolved_config(
     scenario: BraTSScenario,
     importance: LoadedModalityImportance | None,
     component_importance: Mapping[str, float],
-    calibration: Mapping[str, Any],
+    component_calibration: Mapping[str, Any],
+    client_calibration: Mapping[str, Any] | None,
+    client_targets: Mapping[str, float],
     system_trace: SystemTrace | None,
 ) -> dict[str, Any]:
     is_smoke = arguments.max_batches_per_epoch is not None
@@ -225,6 +241,7 @@ def _resolved_config(
             )
         )
     )
+    client_queue_enabled = bool(client_targets)
     return {
         "schema_version": 1,
         "method": method,
@@ -280,6 +297,7 @@ def _resolved_config(
         },
         "selection": {
             "name": method,
+            "framework_version": arguments.framework_version,
             "service_type": arguments.service_type,
             "saturation_level": arguments.saturation_level,
             "impact_weight": arguments.impact_weight,
@@ -292,7 +310,13 @@ def _resolved_config(
                 None if importance is None else importance.source_record()
             ),
             "importance_refresh": "fixed_for_this_run",
-            "target_calibration": dict(calibration),
+            "target_calibration": dict(component_calibration),
+            "client_queue_enabled": client_queue_enabled,
+            "client_targets": dict(client_targets),
+            "client_target_calibration": (
+                None if client_calibration is None else dict(client_calibration)
+            ),
+            "client_service_definition": "successful_completion",
             "reliability_aware": arguments.reliability_aware,
             "completion_model": (
                 "deterministic_success"
@@ -335,13 +359,23 @@ def _resolved_config(
 
 
 def _method_name(arguments: argparse.Namespace) -> str:
+    if arguments.framework_version == "v1":
+        if arguments.impact_weight == 0.0:
+            return "mics_core"
+        return {
+            "none": "mics_impact",
+            "no_component_queue": "mics_impact_no_queue",
+            "modular_additive": "mics_impact_modular",
+            "uniform_importance": "mics_impact_uniform",
+        }[arguments.ablation]
     if arguments.impact_weight == 0.0:
-        return "mics_core"
+        return "mics_v2_core"
     return {
-        "none": "mics_impact",
-        "no_component_queue": "mics_impact_no_queue",
-        "modular_additive": "mics_impact_modular",
-        "uniform_importance": "mics_impact_uniform",
+        "none": "mics_v2_impact",
+        "no_client_queue": "mics_v2_impact_no_client_queue",
+        "no_component_queue": "mics_v2_impact_no_component_queue",
+        "modular_additive": "mics_v2_impact_modular",
+        "uniform_importance": "mics_v2_impact_uniform",
     }[arguments.ablation]
 
 
@@ -396,7 +430,7 @@ def main() -> None:
         for probability in system_trace.availability_probabilities.values()
     )
     if has_random_availability:
-        calibration = calibrate_availability_aware_service_targets(
+        component_calibration = calibrate_availability_aware_service_targets(
             manifests,
             availability_probabilities=(
                 system_trace.availability_probabilities
@@ -407,10 +441,49 @@ def main() -> None:
             **calibration_arguments,
         )
     else:
-        calibration = calibrate_static_service_targets(
+        component_calibration = calibrate_static_service_targets(
             manifests,
             **calibration_arguments,
         )
+
+    client_queue_enabled = (
+        arguments.framework_version == "v2"
+        and arguments.ablation != "no_client_queue"
+    )
+    client_calibration = None
+    if client_queue_enabled:
+        client_ids = tuple(client.client_id for client in scenario.clients)
+        client_arguments = {
+            "budget": arguments.clients_per_round,
+            "completion_probabilities": (
+                None
+                if system_trace is None
+                else system_trace.completion_probabilities
+            ),
+            "oracle_factor": 1.0 - 1.0 / math.e,
+            "safety_margin": arguments.safety_margin,
+        }
+        if has_random_availability:
+            client_calibration = calibrate_availability_aware_client_targets(
+                client_ids,
+                availability_probabilities=(
+                    system_trace.availability_probabilities
+                ),
+                minimum_available_clients=(
+                    system_trace.minimum_available_clients
+                ),
+                **client_arguments,
+            )
+        else:
+            client_calibration = calibrate_static_client_targets(
+                client_ids,
+                **client_arguments,
+            )
+    client_targets = (
+        {}
+        if client_calibration is None
+        else dict(client_calibration.operational_targets)
+    )
 
     torch.manual_seed(arguments.model_seed)
     if torch.cuda.is_available():
@@ -424,7 +497,9 @@ def main() -> None:
         scenario,
         importance,
         component_importance,
-        calibration.as_dict(),
+        component_calibration.as_dict(),
+        None if client_calibration is None else client_calibration.as_dict(),
+        client_targets,
         system_trace,
     )
     model = MultiEncoderUNet3D(
@@ -436,7 +511,7 @@ def main() -> None:
         modality_dropout=arguments.modality_dropout,
     )
     selector = MICSSelector(
-        calibration.operational_targets,
+        component_calibration.operational_targets,
         seed=arguments.selection_seed,
         service_type=arguments.service_type,
         saturation_levels=levels,
@@ -449,6 +524,7 @@ def main() -> None:
             if arguments.ablation == "modular_additive"
             else SUBMODULAR_SERVICE
         ),
+        client_targets=client_targets,
         reliability_aware=arguments.reliability_aware,
     )
     training = LocalTrainingConfig(
@@ -493,10 +569,23 @@ def main() -> None:
     )
 
     print(f"Run directory: {recorder.run_dir}")
-    calibration_summary = calibration.as_dict()
-    calibration_support = calibration_summary.pop("support")
-    calibration_summary["support_entry_count"] = len(calibration_support)
-    print(json.dumps({"calibration": calibration_summary}, sort_keys=True))
+    component_summary = component_calibration.as_dict()
+    component_support = component_summary.pop("support")
+    component_summary["support_entry_count"] = len(component_support)
+    client_summary = None
+    if client_calibration is not None:
+        client_summary = client_calibration.as_dict()
+        client_support = client_summary.pop("support")
+        client_summary["support_entry_count"] = len(client_support)
+    print(
+        json.dumps(
+            {
+                "component_calibration": component_summary,
+                "client_calibration": client_summary,
+            },
+            sort_keys=True,
+        )
+    )
     if arguments.max_batches_per_epoch is not None:
         print(
             "NOTE: max_batches_per_epoch is set; this run validates integration "

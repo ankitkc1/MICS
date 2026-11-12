@@ -191,6 +191,43 @@ This job holds the trace, model, training, and cases fixed while separately
 removing learned importance, queue feedback, or diminishing returns, and while
 replacing learned importance with uniform component weights.
 
+## MICS-v2 calibrated client-queue pilot
+
+The v2 pilot compares full MICS-v2, MICS-Core-v2, and the no-client-queue
+ablation with one matched seed and the existing 150-round trace. The job first
+runs a model-free selector preflight, then trains and evaluates all three
+methods. Full and Core receive the same calibrated client targets; the third
+method disables those targets and is mechanically equivalent to v1
+MICS-Impact under matched inputs.
+
+This is a development pilot, not a statistical replication study. Running a
+second dataset strengthens external-validity evidence but does not replace
+within-dataset random-seed replication.
+
+After pulling the v2 revision, submit the job:
+
+    cd "$HOME/MICS"
+    conda activate mics
+    JOB_ID=$(sbatch --parsable \
+      hpc/slurm/mics_v2_client_queue_pilot.slurm)
+    echo "JOB_ID=$JOB_ID"
+
+Inspect it using the saved scheduler ID:
+
+    sacct -j "$JOB_ID" --allocations \
+      --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS,ReqMem
+    cat "mics-v2-pilot-${JOB_ID}.out"
+    cat "mics-v2-pilot-${JOB_ID}.err"
+    cat "results/studies/mics_v2_client_queue_pilot_v1/selector_preflight.json"
+    cat "results/studies/mics_v2_client_queue_pilot_v1/mics_v2_pilot_matrix.json"
+
+The output must end with
+`MICS-V2 CLIENT-QUEUE SINGLE-SEED PILOT PASSED`. The preflight must show
+non-empty client targets and improved selection-count fairness for full v2 over
+the no-client-queue ablation. The guarded matrix report then confirms that full
+and Core used identical client targets and that their recorded selections match
+the preflight exactly.
+
 ## Full five-seed MICS ablation study
 
 The frozen protocol is `configs/mics_ablation_study_v1.json`. It declares five

@@ -60,12 +60,15 @@ EVALUATION_INVARIANTS = (
 )
 SELECTION_DISCLOSURE_FIELDS = (
     "name",
+    "framework_version",
     "variant",
     "ablation",
     "service_type",
     "saturation_level",
     "impact_weight",
     "component_queue_weight",
+    "client_queue_enabled",
+    "client_targets",
     "subset_utility",
     "importance_mode",
     "reliability_aware",

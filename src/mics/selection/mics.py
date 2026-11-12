@@ -624,6 +624,81 @@ def calibrate_availability_aware_service_targets(
     )
 
 
+def calibrate_static_client_targets(
+    client_ids: Iterable[str],
+    *,
+    budget: int,
+    completion_probabilities: Mapping[str, float] | None = None,
+    priorities: Mapping[str, float] | None = None,
+    oracle_factor: float = 1.0 - 1.0 / math.e,
+    safety_margin: float = 0.1,
+) -> StaticServiceCalibration:
+    """Calibrate successful-participation targets for a static client set.
+
+    Each client is represented as its own unit-coverage service. The resulting
+    LP therefore finds a max-min feasible successful-participation rate under
+    the declared client budget and completion probabilities.
+    """
+
+    clients = tuple(str(client_id) for client_id in client_ids)
+    if not clients or len(clients) != len(set(clients)):
+        raise ValueError("client_ids must be non-empty and unique.")
+    declared_priorities = (
+        {client_id: 1.0 for client_id in clients}
+        if priorities is None
+        else {str(key): float(value) for key, value in priorities.items()}
+    )
+    if set(declared_priorities) != set(clients):
+        raise ValueError("Client priorities must define every client.")
+    return calibrate_static_service_targets(
+        {client_id: (client_id,) for client_id in clients},
+        budget=budget,
+        priorities=declared_priorities,
+        completion_probabilities=completion_probabilities,
+        service_type=PURE_COVERAGE,
+        saturation_levels={client_id: 1 for client_id in clients},
+        oracle_factor=oracle_factor,
+        safety_margin=safety_margin,
+    )
+
+
+def calibrate_availability_aware_client_targets(
+    client_ids: Iterable[str],
+    *,
+    budget: int,
+    availability_probabilities: Mapping[str, float],
+    minimum_available_clients: int,
+    completion_probabilities: Mapping[str, float] | None = None,
+    priorities: Mapping[str, float] | None = None,
+    oracle_factor: float = 1.0 - 1.0 / math.e,
+    safety_margin: float = 0.1,
+) -> AvailabilityAwareServiceCalibration:
+    """Calibrate participation targets over conditioned availability states."""
+
+    clients = tuple(str(client_id) for client_id in client_ids)
+    if not clients or len(clients) != len(set(clients)):
+        raise ValueError("client_ids must be non-empty and unique.")
+    declared_priorities = (
+        {client_id: 1.0 for client_id in clients}
+        if priorities is None
+        else {str(key): float(value) for key, value in priorities.items()}
+    )
+    if set(declared_priorities) != set(clients):
+        raise ValueError("Client priorities must define every client.")
+    return calibrate_availability_aware_service_targets(
+        {client_id: (client_id,) for client_id in clients},
+        budget=budget,
+        priorities=declared_priorities,
+        availability_probabilities=availability_probabilities,
+        minimum_available_clients=minimum_available_clients,
+        completion_probabilities=completion_probabilities,
+        service_type=PURE_COVERAGE,
+        saturation_levels={client_id: 1 for client_id in clients},
+        oracle_factor=oracle_factor,
+        safety_margin=safety_margin,
+    )
+
+
 class MICSSelector(ClientSelector):
     """Completion-aware MICS-Core/Impact cardinality-greedy selector."""
 

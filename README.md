@@ -44,6 +44,9 @@ Implemented and tested:
   matched system traces, client-round random streams, and held-out cases;
 - registered MICS-Core, no-queue, modular-utility, and uniform-importance
   ablations with a matched five-variant audit;
+- versioned MICS-v2 client-participation queues with exact
+  availability-conditioned target calibration, a matched MICS-Core-v2, and a
+  no-client-queue mechanism ablation;
 - a frozen five-seed ablation protocol, resumable Slurm array, checkpoint-wise
   full validation, and paired Student-t aggregate reporting;
 - CPU tests and an HPC GPU smoke-job template.

@@ -201,6 +201,22 @@ def _selection_summary(
             for record in queue_records
             for value in record.values()
         )
+    final_client_queues = None
+    maximum_client_queue_over_run = None
+    client_queue_records = [
+        outcome.get("client_queues_after_round")
+        for outcome in selector_outcomes
+        if isinstance(outcome, Mapping)
+        and isinstance(outcome.get("client_queues_after_round"), Mapping)
+        and outcome.get("client_queues_after_round")
+    ]
+    if client_queue_records:
+        final_client_queues = dict(client_queue_records[-1])
+        maximum_client_queue_over_run = max(
+            float(value)
+            for record in client_queue_records
+            for value in record.values()
+        )
     impact_coverage = [
         record.get("impact_weighted_modality_coverage")
         for record in diagnostics
@@ -316,6 +332,8 @@ def _selection_summary(
         "cumulative_component_update_counts": dict(component_counts),
         "final_component_queues": final_queues,
         "maximum_component_queue_over_run": maximum_queue_over_run,
+        "final_client_queues": final_client_queues,
+        "maximum_client_queue_over_run": maximum_client_queue_over_run,
         "total_selection_seconds": sum(
             float(record["selection_seconds"]) for record in metrics
         ),

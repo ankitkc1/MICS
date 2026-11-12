@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "study_id": "mics_v2_client_queue_pilot_v1",
+  "protocol_status": "development_single_seed",
+  "interpretation": "exploratory development after inspection of v1 validation results",
+  "source_study": "mics_ablation_balanced_v1",
+  "methods": [
+    "mics_v2_impact",
+    "mics_v2_core",
+    "mics_v2_impact_no_client_queue"
+  ],
+  "seed": {
+    "seed_id": "s01",
+    "model": 101,
+    "selection": 1009,
+    "data": 2003,
+    "trace": 3001
+  },
+  "system_trace": {
+    "reuse": "results/studies/mics_ablation_balanced_v1/s01/system_trace.json",
+    "rounds": 150,
+    "minimum_available_clients": 2,
+    "availability_probability": 0.8,
+    "completion_probability": 0.9
+  },
+  "training": {
+    "clients_per_round": 2,
+    "checkpoint_every": 10,
+    "base_channels": 16,
+    "num_levels": 4,
+    "fusion": "mean_var",
+    "modality_dropout": 0.2,
+    "patch_size": [96, 96, 96],
+    "foreground_probability": 0.5,
+    "batch_size": 1,
+    "num_workers": 0,
+    "local_epochs": 1,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.00001,
+    "gradient_clip_norm": 5.0,
+    "amp_initial_scale": 4096,
+    "amp_max_retries": 8,
+    "service_type": "pure_coverage",
+    "saturation_level": 1,
+    "safety_margin": 0.1,
+    "impact_weight": 1.0,
+    "reliability_aware": true
+  },
+  "client_participation": {
+    "service": "successful_completion",
+    "priority": "equal",
+    "calibration": "availability_conditioned_exact_max_min_lp",
+    "oracle_factor": "1-1/e",
+    "safety_margin": 0.1
+  },
+  "evaluation": {
+    "partition": "validation",
+    "roi_size": [96, 96, 96],
+    "overlap": 0.5,
+    "checkpoints": [150]
+  },
+  "test_partitions_locked": true
+}

@@ -4,6 +4,30 @@ The primary ablation study changes one selector mechanism at a time while
 holding the model, client budget, local training, component-wise aggregation,
 system trace, seeds, and evaluation cases fixed.
 
+## MICS-v2 client-participation pilot
+
+MICS-v2 adds calibrated per-client queues to the component-level objective.
+The first matched pilot contains exactly three variants:
+
+`mics_v2_impact` is the full method: calibrated component queues,
+validation-derived modality impact, diminishing-return component coverage, and
+calibrated successful-client-participation queues.
+
+`mics_v2_core` removes only the modality-impact term. It uses exactly the same
+client targets and queue updates as full MICS-v2. Any difference between these
+two methods is therefore attributable to impact weighting under the matched
+trace and random streams, rather than to different client-fairness mechanisms.
+
+`mics_v2_impact_no_client_queue` removes only the client-participation queues.
+For matched inputs it is equivalent to v1 `mics_impact`, and directly measures
+what the new client-level calibration changes.
+
+The registered pilot uses one seed and final validation only. It is a
+development experiment for checking the mechanism and choosing whether the v2
+design merits a full study. A second dataset is valuable evidence of external
+validity, but it does not estimate stochastic variability within either
+dataset; the pilot must not be reported as a significance-tested comparison.
+
 ## Registered variants
 
 `mics_impact` is the complete method. For modality `m`, its fixed-round weight
@@ -45,9 +69,10 @@ the full, no-queue, and modular variants share the same immutable importance
 record and disclose its one-time cost.
 
 The smoke job uses four rounds, one local batch, and one validation case per
-client. It validates plumbing only. The scientific protocol instead uses
+client. It validates plumbing only. The original v1 scientific protocol uses
 complete local training, five preregistered seed tuples, full validation at
-every archived checkpoint, and a disjoint selector-calibration partition.
+every archived checkpoint, and a disjoint selector-calibration partition. The
+v2 single-seed pilot is explicitly separate from that confirmatory protocol.
 
 Run `hpc/slurm/mics_ablation_matrix_smoke.slurm` after setting
 `MICS_IMPORTANCE_OUTPUT`. The job creates one shared neutral system trace, five

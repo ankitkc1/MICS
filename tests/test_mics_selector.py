@@ -12,7 +12,9 @@ from mics.selection import (
     PURE_COVERAGE,
     SUBMODULAR_SERVICE,
     TRUNCATED_LINEAR,
+    calibrate_availability_aware_client_targets,
     calibrate_availability_aware_service_targets,
+    calibrate_static_client_targets,
     calibrate_static_service_targets,
     expected_component_service,
 )
@@ -71,6 +73,30 @@ class MICSSelectorTests(unittest.TestCase):
             sum(float(item["probability"]) for item in result.support),
             1.0,
         )
+
+    def test_client_target_calibration_is_symmetric_and_feasible(self) -> None:
+        static = calibrate_static_client_targets(
+            ("A", "B", "C", "D"),
+            budget=2,
+            completion_probabilities={name: 0.9 for name in "ABCD"},
+            oracle_factor=1.0,
+            safety_margin=0.2,
+        )
+        availability = calibrate_availability_aware_client_targets(
+            ("A", "B", "C", "D"),
+            budget=2,
+            availability_probabilities={name: 0.8 for name in "ABCD"},
+            minimum_available_clients=2,
+            completion_probabilities={name: 0.9 for name in "ABCD"},
+            oracle_factor=1.0,
+            safety_margin=0.2,
+        )
+
+        self.assertAlmostEqual(static.boundary_scale, 0.45)
+        self.assertEqual(set(static.operational_targets.values()), {0.36})
+        self.assertAlmostEqual(availability.boundary_scale, 0.45)
+        for target in availability.operational_targets.values():
+            self.assertAlmostEqual(target, 0.36)
 
     def test_availability_calibration_respects_rare_component_opportunity(
         self,
@@ -348,6 +374,104 @@ class MICSSelectorTests(unittest.TestCase):
             no_queue.plan_round(second_context).selected_client_ids,
             ("A",),
         )
+
+    def test_client_queues_prevent_complete_client_monopolisation(self) -> None:
+        clients = (
+            ClientState("A", {"m1", "m2"}, 10),
+            ClientState("B", {"m1", "m2"}, 10),
+            ClientState("C", {"m1"}, 10),
+            ClientState("D", {"m2"}, 10),
+        )
+        baseline = MICSSelector(
+            {"m1": 0.4, "m2": 0.4},
+            seed=37,
+            impact_weight=1.0,
+            reliability_aware=False,
+        )
+        v2 = MICSSelector(
+            {"m1": 0.4, "m2": 0.4},
+            seed=37,
+            impact_weight=1.0,
+            client_targets={client.client_id: 0.2 for client in clients},
+            reliability_aware=False,
+        )
+        counts = {
+            "baseline": {client.client_id: 0 for client in clients},
+            "v2": {client.client_id: 0 for client in clients},
+        }
+        for round_index in range(80):
+            round_context = SelectionContext(
+                round_index=round_index,
+                budget=2,
+                clients=clients,
+                component_importance={"m1": 0.5, "m2": 0.5},
+            )
+            for name, selector in (("baseline", baseline), ("v2", v2)):
+                plan = selector.plan_round(round_context)
+                for client_id in plan.selected_client_ids:
+                    counts[name][client_id] += 1
+                selector.observe_round(
+                    round_index,
+                    selected_client_ids=plan.selected_client_ids,
+                    successful_client_ids=plan.selected_client_ids,
+                )
+
+        def fairness(values: dict[str, int]) -> float:
+            total = sum(values.values())
+            return total * total / (len(values) * sum(v * v for v in values.values()))
+
+        self.assertGreater(fairness(counts["v2"]), 0.98)
+        self.assertGreater(
+            fairness(counts["v2"]),
+            fairness(counts["baseline"]) + 0.05,
+        )
+        self.assertGreater(counts["v2"]["C"], counts["baseline"]["C"])
+        self.assertGreater(counts["v2"]["D"], counts["baseline"]["D"])
+
+    def test_empty_client_targets_are_exactly_v1_selection_mechanics(self) -> None:
+        clients = (
+            ClientState("A", {"m1", "m2"}, 10),
+            ClientState("B", {"m1"}, 10),
+            ClientState("C", {"m2"}, 10),
+        )
+        v1 = MICSSelector(
+            {"m1": 0.25, "m2": 0.25},
+            seed=71,
+            impact_weight=1.0,
+            reliability_aware=False,
+        )
+        no_client_queue = MICSSelector(
+            {"m1": 0.25, "m2": 0.25},
+            seed=71,
+            impact_weight=1.0,
+            client_targets={},
+            reliability_aware=False,
+        )
+        for round_index in range(12):
+            context = SelectionContext(
+                round_index=round_index,
+                budget=2,
+                clients=clients,
+                component_importance={"m1": 0.7, "m2": 0.3},
+            )
+            left = v1.plan_round(context)
+            right = no_client_queue.plan_round(context)
+            self.assertEqual(
+                left.selected_client_ids,
+                right.selected_client_ids,
+            )
+            self.assertEqual(
+                left.metadata["greedy_steps"],
+                right.metadata["greedy_steps"],
+            )
+            for selector, plan in ((v1, left), (no_client_queue, right)):
+                selector.observe_round(
+                    round_index,
+                    selected_client_ids=plan.selected_client_ids,
+                    successful_client_ids=plan.selected_client_ids,
+                )
+        self.assertEqual(v1.component_queues, no_client_queue.component_queues)
+        self.assertEqual(no_client_queue.client_queues, {})
 
     def test_state_round_trip_preserves_next_tie_break(self) -> None:
         original = MICSSelector(
