@@ -226,7 +226,9 @@ The output must end with
 non-empty client targets and improved selection-count fairness for full v2 over
 the no-client-queue ablation. The guarded matrix report then confirms that full
 and Core used identical client targets and that their recorded selections match
-the preflight exactly.
+the preflight exactly. The scheduler script also holds a study-level advisory
+lock for its complete lifetime. A second job targeting the same study exits
+immediately rather than writing concurrent checkpoints or JSONL records.
 
 ## Full five-seed MICS ablation study
 

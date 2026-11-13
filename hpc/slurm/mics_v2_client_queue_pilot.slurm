@@ -53,6 +53,18 @@ nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
 python scripts/validate_install.py
 
 mkdir -p "$STUDY_ROOT"
+LOCK_FILE=$STUDY_ROOT/.mics_v2_pilot.lock
+exec 9>>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "Another MICS-v2 pilot job is already writing to $STUDY_ROOT" >&2
+    echo "Refusing concurrent execution to protect checkpoints and logs." >&2
+    exit 75
+fi
+printf 'job_id=%s source_revision=%s acquired_utc=%s\n' \
+    "${SLURM_JOB_ID:-unknown}" \
+    "$SOURCE_REVISION" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&9
+
 if [[ ! -f "$PREFLIGHT" ]]; then
     python scripts/simulate_mics_v2_selector.py \
         --dataset-root "$DATASET_ROOT" \
