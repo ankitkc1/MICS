@@ -74,6 +74,11 @@ SELECTION_DISCLOSURE_FIELDS = (
     "reliability_aware",
     "candidate_size",
     "probe_max_batches",
+    "loss_direction",
+    "loss_proxy",
+    "upstream_revision",
+    "parameters",
+    "feedback_duration",
 )
 
 

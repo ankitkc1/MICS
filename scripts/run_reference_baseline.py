@@ -22,10 +22,11 @@ from mics.experiments import (
     load_system_trace,
     run_tracked_federated_training,
 )
-from mics.selection import DivFLSelector, PowerOfChoiceSelector
+from mics.selection import DivFLSelector, MFedMCSelector, OortSelector, PowerOfChoiceSelector
+from mics.selection.oort import OORT_PARAMETERS, OORT_REVISION
 from mics.training import LocalTrainingConfig
 
-BASELINE_METHODS = ("power_of_choice", "divfl")
+BASELINE_METHODS = ("power_of_choice", "divfl", "mfedmc", "oort")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,6 +91,33 @@ def _scenario_files(scenario: BraTSScenario) -> tuple[Path, ...]:
 
 
 def _method_record(arguments: argparse.Namespace) -> dict[str, Any]:
+    if arguments.method == "mfedmc":
+        return {
+            "name": "mfedmc_client_low_loss",
+            "variant": "paper_low_loss_shared_decoder_probe",
+            "loss_direction": "lower",
+            "loss_proxy": "mean_available_single_modality_shared_decoder_loss",
+            "probe_clients": "all_currently_available_clients",
+            "probe_partition": "train",
+            "probe_max_batches": arguments.probe_max_batches,
+            "probe_timing": "pre_training",
+            "aggregation_adaptation": "common_component_weighted_FedAvg",
+            "reference": "https://arxiv.org/abs/2401.16685v2",
+            "released_code_revision": "bb9907254683818dfe9e4784f798a25eca6a1d58",
+            "released_code_default_loss_direction": "higher",
+        }
+    if arguments.method == "oort":
+        return {
+            "name": "oort_training",
+            "variant": "pinned_oort_with_rms_batch_loss_and_observed_duration",
+            "upstream_revision": OORT_REVISION,
+            "parameters": dict(OORT_PARAMETERS),
+            "probe_partition": "none",
+            "utility": "training_samples_times_rms_batch_loss",
+            "initial_duration": 1.0,
+            "feedback_duration": "observed_local_optimization_seconds",
+            "reference": "https://www.usenix.org/conference/osdi21/presentation/lai",
+        }
     if arguments.method == "power_of_choice":
         return {
             "name": "power_of_choice",
@@ -229,6 +257,8 @@ def _validate_arguments(arguments: argparse.Namespace) -> torch.device:
         raise SystemExit("Batch size or worker count is invalid.")
     if arguments.probe_max_batches is not None and arguments.probe_max_batches <= 0:
         raise SystemExit("Probe batch limit must be positive when provided.")
+    if arguments.method == "oort" and arguments.probe_max_batches is not None:
+        raise SystemExit("Oort learns from training feedback and accepts no probe batch limit.")
     if min(arguments.model_seed, arguments.selection_seed, arguments.data_seed) < 0:
         raise SystemExit("Scientific seeds must be non-negative.")
     if (
@@ -284,11 +314,18 @@ def main() -> None:
             seed=arguments.selection_seed,
             max_probe_batches=arguments.probe_max_batches,
         )
-    else:
+    elif arguments.method == "divfl":
         selector = DivFLSelector(
             seed=arguments.selection_seed,
             max_probe_batches=arguments.probe_max_batches,
         )
+    elif arguments.method == "mfedmc":
+        selector = MFedMCSelector(
+            seed=arguments.selection_seed,
+            max_probe_batches=arguments.probe_max_batches,
+        )
+    else:
+        selector = OortSelector(seed=arguments.selection_seed)
     settings = LocalTrainingConfig(
         local_epochs=arguments.local_epochs,
         learning_rate=arguments.learning_rate,

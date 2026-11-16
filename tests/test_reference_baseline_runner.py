@@ -82,7 +82,7 @@ def _write_scenario(root: Path) -> tuple[Path, Path]:
 
 
 class ReferenceBaselineRunnerTests(unittest.TestCase):
-    def test_power_of_choice_and_divfl_write_costed_runs(self) -> None:
+    def test_baselines_write_costed_checkpointed_runs(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
             root = Path(temporary)
@@ -94,6 +94,8 @@ class ReferenceBaselineRunnerTests(unittest.TestCase):
             for method, probe_kind in (
                 ("power_of_choice", "local_loss"),
                 ("divfl", "gradient_vector"),
+                ("mfedmc", "modality_loss"),
+                ("oort", None),
             ):
                 with self.subTest(method=method):
                     run_id = f"{method}-cpu-smoke"
@@ -120,8 +122,6 @@ class ReferenceBaselineRunnerTests(unittest.TestCase):
                         "1",
                         "--candidate-size",
                         "2",
-                        "--probe-max-batches",
-                        "1",
                         "--base-channels",
                         "2",
                         "--num-levels",
@@ -140,6 +140,8 @@ class ReferenceBaselineRunnerTests(unittest.TestCase):
                         "cpu",
                         "--no-amp",
                     ]
+                    if probe_kind is not None:
+                        command.extend(("--probe-max-batches", "1"))
                     result = subprocess.run(
                         command,
                         cwd=project_root,
@@ -165,6 +167,29 @@ class ReferenceBaselineRunnerTests(unittest.TestCase):
                         .strip()
                     )
                     self.assertEqual(status["state"], "completed")
+                    if probe_kind is None:
+                        self.assertIsNone(record["selection_probe"])
+                        self.assertEqual(
+                            record["communication"]["selection_feedback_upload_bytes"],
+                            16 * len(record["successful_clients"]),
+                        )
+                        self.assertEqual(
+                            set(record["selector_outcome"]["client_feedback"]),
+                            set(record["successful_clients"]),
+                        )
+                        self.assertTrue(all(
+                            value["statistical_utility"] > 0
+                            for value in record["selector_outcome"]["client_feedback"].values()
+                        ))
+                        self.assertTrue((run_dir / "checkpoints" / "last.pt").is_file())
+                        status["state"] = "failed"
+                        (run_dir / "status.json").write_text(json.dumps(status))
+                        replay = subprocess.run(
+                            [*command, "--resume"], cwd=project_root, env=environment,
+                            capture_output=True, text=True, check=False,
+                        )
+                        self.assertEqual(replay.returncode, 0, replay.stderr)
+                        continue
                     self.assertEqual(record["selection_probe"]["kind"], probe_kind)
                     self.assertEqual(
                         record["selection_probe"]["partition"],

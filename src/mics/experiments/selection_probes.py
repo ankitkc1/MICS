@@ -99,6 +99,8 @@ def run_selection_probes(
             model.configure_client_modalities(modalities)
             model.zero_grad(set_to_none=True)
             weighted_loss = 0.0
+            modality_loss_sums: dict[str, float] = {}
+            modality_examples: dict[str, int] = {}
             examples = 0
             batches = 0
             client_started = time.perf_counter()
@@ -107,7 +109,40 @@ def run_selection_probes(
                 batch_size = int(target.shape[0])
                 if batch_size <= 0:
                     raise ValueError("Probe batch cannot be empty.")
-                if request.kind == "local_loss":
+                if request.kind == "modality_loss":
+                    losses = []
+                    for modality in modalities:
+                        if modality not in inputs:
+                            continue
+                        valid = torch.ones(
+                            batch_size, dtype=torch.bool, device=target_device
+                        )
+                        if availability is not None:
+                            valid = availability[:, model.modality_names.index(modality)]
+                        count = int(valid.sum())
+                        if count == 0:
+                            continue
+                        model.configure_client_modalities((modality,))
+                        with torch.no_grad():
+                            prediction = model({modality: inputs[modality][valid]})
+                            modality_loss = criterion(prediction, target[valid])
+                        if not bool(torch.isfinite(modality_loss)):
+                            raise RuntimeError(
+                                "A single-modality loss probe was non-finite."
+                            )
+                        modality_loss_sums[modality] = (
+                            modality_loss_sums.get(modality, 0.0)
+                            + float(modality_loss) * count
+                        )
+                        modality_examples[modality] = (
+                            modality_examples.get(modality, 0) + count
+                        )
+                        losses.append(modality_loss)
+                    model.configure_client_modalities(modalities)
+                    if not losses:
+                        continue
+                    loss = torch.stack(losses).mean()
+                elif request.kind == "local_loss":
                     with torch.no_grad():
                         loss = criterion(model(inputs, availability), target)
                 else:
@@ -130,6 +165,11 @@ def run_selection_probes(
 
             mean_loss = weighted_loss / examples
             client_statistics: dict[str, Any] = {"local_loss": mean_loss}
+            if request.kind == "modality_loss":
+                client_statistics["modality_losses"] = {
+                    modality: total / modality_examples[modality]
+                    for modality, total in modality_loss_sums.items()
+                }
             logical_gradient_bytes = 0
             gradient_dimension = None
             gradient_norm = None
@@ -162,6 +202,8 @@ def run_selection_probes(
                     }
                 )
                 upload_bytes[client_id] = logical_gradient_bytes
+            elif request.kind == "modality_loss":
+                upload_bytes[client_id] = 8 * len(modality_loss_sums)
             else:
                 upload_bytes[client_id] = 8
             statistics[client_id] = client_statistics
@@ -174,6 +216,7 @@ def run_selection_probes(
                 "examples": examples,
                 "batches": batches,
                 "mean_loss": mean_loss,
+                "modality_losses": client_statistics.get("modality_losses"),
                 "gradient_dimension": gradient_dimension,
                 "gradient_norm": gradient_norm,
                 "elapsed_seconds": time.perf_counter() - client_started,

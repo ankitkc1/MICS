@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-SELECTION_PROBE_KINDS = ("local_loss", "gradient_vector")
+SELECTION_PROBE_KINDS = ("local_loss", "gradient_vector", "modality_loss")
 
 
 @dataclass(frozen=True)
@@ -134,6 +134,15 @@ class ClientSelector(ABC):
         """Return resumable selector state."""
 
         return {}
+
+    def record_training_feedback(
+        self,
+        round_index: int,
+        feedback: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        """Receive completed-client training statistics for history-based policies."""
+
+        del round_index, feedback
 
     def observe_round(
         self,

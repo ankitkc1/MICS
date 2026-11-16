@@ -29,3 +29,6 @@ classifiers = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"mics.selection.vendor" = ["OORT_LICENSE"]
+

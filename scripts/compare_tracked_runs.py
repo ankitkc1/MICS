@@ -355,6 +355,10 @@ def _selection_summary(
         ),
         "cumulative_selection_probe_download_bytes": probe_download_bytes,
         "cumulative_selection_probe_upload_bytes": probe_upload_bytes,
+        "cumulative_selection_feedback_upload_bytes": sum(
+            int(record["communication"].get("selection_feedback_upload_bytes", 0))
+            for record in metrics
+        ),
     }
 
 

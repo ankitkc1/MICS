@@ -198,6 +198,23 @@ class SelectionProbeTests(unittest.TestCase):
             all(value > 0 for value in outcome.upload_bytes_by_client.values())
         )
 
+    def test_modality_loss_probe_preserves_weights_and_accounts_scalars(self) -> None:
+        initial = copy.deepcopy(self.model.state_dict())
+        batch = self._batch("flair")
+        batch["inputs"]["t1"] = torch.randn(1, 1, 4, 4, 4)
+        outcome = run_selection_probes(
+            self.model,
+            SelectionProbeRequest(0, ("C1",), "modality_loss", max_batches=1),
+            loaders={"C1": [batch]},
+            client_modalities={"C1": ("flair", "t1")},
+            component_bytes=self.component_bytes,
+            device="cpu",
+        )
+        self.assertEqual(set(outcome.statistics["C1"]["modality_losses"]), {"flair", "t1"})
+        self.assertEqual(outcome.upload_bytes_by_client["C1"], 16)
+        for name, value in self.model.state_dict().items():
+            self.assertTrue(torch.equal(value, initial[name]))
+
 
 if __name__ == "__main__":
     unittest.main()

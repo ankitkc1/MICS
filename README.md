@@ -36,6 +36,10 @@ Implemented and tested:
 - a shared tracked FL runner for uniform and MICS selector comparisons;
 - train-loss Power-of-Choice and gradient facility-location DivFL-style
   baselines with explicit probe-time and communication accounting;
+- a paper-defined MFedMC low-loss client-policy adaptation using
+  single-modality shared-decoder probes;
+- a pinned Oort training selector with checkpointed exploration, pacer,
+  RMS batch-loss utility, and observed client-duration feedback;
 - immutable matched availability/completion-potential traces for controlled
   system-heterogeneity experiments;
 - immutable run metadata, selector-state checkpoints, and resume support;
@@ -49,13 +53,19 @@ Implemented and tested:
   no-client-queue mechanism ablation;
 - a frozen five-seed ablation protocol, resumable Slurm array, checkpoint-wise
   full validation, and paired Student-t aggregate reporting;
+- a full single-seed five-baseline comparison that reuses the completed v2
+  matrix, matches its recorded inputs, and discloses both source revisions;
 - CPU tests and an HPC GPU smoke-job template.
 
 Planned but not yet claimed as experimental evidence:
 
 - cached-update MICS-Diversity and knapsack-oracle extensions;
-- Oort and additional modality-aware comparison methods;
-- execution and review of the complete multi-seed journal experiments.
+- additional end-to-end modality-aware comparison methods;
+- execution and review of the final journal experiments.
+
+The complete v2 comparison workflow is described in
+docs/single_seed_baselines.md. It uses the recorded model/selection/data/trace
+tuple 101/1009/2003/3001 and complete 150-round training.
 
 ## Model architecture
 

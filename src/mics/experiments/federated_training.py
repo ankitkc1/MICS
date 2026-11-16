@@ -431,11 +431,35 @@ def run_tracked_federated_training(
             )
             if result.successful_client_ids != successful_client_ids:
                 raise RuntimeError("Federated result changed trace completion order.")
+            selector.record_training_feedback(
+                round_index,
+                {
+                    local.client_id: {
+                        "mean_loss": local.mean_loss,
+                        "loss_rms": local.loss_rms,
+                        "elapsed_seconds": local.elapsed_seconds,
+                        "examples_seen": local.examples_seen,
+                    }
+                    for local in result.local_results
+                },
+            )
             selector_outcome = selector.observe_round(
                 round_index,
                 selected_client_ids=plan.selected_client_ids,
                 successful_client_ids=successful_client_ids,
             )
+            feedback_upload_by_client = {
+                client_id: int(value)
+                for client_id, value in selector_outcome.get(
+                    "feedback_upload_bytes_by_client", {}
+                ).items()
+            }
+            if not set(feedback_upload_by_client).issubset(successful_client_set):
+                raise ValueError(
+                    "Selection feedback upload contains an unsuccessful client."
+                )
+            if any(value < 0 for value in feedback_upload_by_client.values()):
+                raise ValueError("Selection feedback bytes must be non-negative.")
             training_upload_by_client = {
                 local.client_id: sum(
                     component_state_nbytes(state)
@@ -450,6 +474,10 @@ def run_tracked_federated_training(
                 )
             total_upload_by_client = dict(probe_upload_by_client)
             for client_id, value in training_upload_by_client.items():
+                total_upload_by_client[client_id] = (
+                    total_upload_by_client.get(client_id, 0) + value
+                )
+            for client_id, value in feedback_upload_by_client.items():
                 total_upload_by_client[client_id] = (
                     total_upload_by_client.get(client_id, 0) + value
                 )
@@ -492,6 +520,7 @@ def run_tracked_federated_training(
                 probe_upload_by_client=probe_upload_by_client,
                 training_download_by_client=training_download_by_client,
                 training_upload_by_client=training_upload_by_client,
+                feedback_upload_by_client=feedback_upload_by_client,
                 total_download_by_client=total_download_by_client,
                 total_upload_by_client=total_upload_by_client,
             )
@@ -545,6 +574,7 @@ def _round_record(
     probe_upload_by_client: dict[str, int],
     training_download_by_client: dict[str, int],
     training_upload_by_client: dict[str, int],
+    feedback_upload_by_client: dict[str, int],
     total_download_by_client: dict[str, int],
     total_upload_by_client: dict[str, int],
 ) -> dict[str, Any]:
@@ -590,6 +620,10 @@ def _round_record(
             "training_upload_bytes": sum(
                 training_upload_by_client.values()
             ),
+            "selection_feedback_upload_bytes": sum(
+                feedback_upload_by_client.values()
+            ),
+            "selection_feedback_upload_bytes_by_client": feedback_upload_by_client,
             "selection_probe_download_bytes_by_client": (
                 probe_download_by_client
             ),
@@ -610,6 +644,7 @@ def _round_record(
                 "examples_seen": local.examples_seen,
                 "batches_processed": local.batches_processed,
                 "optimizer_steps": local.optimizer_steps,
+                "loss_rms": local.loss_rms,
                 "mean_loss": local.mean_loss,
                 "training_patch_dice_diagnostic": dict(local.region_dice),
                 "mean_gradient_norm_before_clipping": local.mean_gradient_norm,

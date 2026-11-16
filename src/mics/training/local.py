@@ -69,6 +69,7 @@ class LocalTrainingResult:
     final_amp_scale: float
     trainable_components: tuple[str, ...]
     update: ComponentUpdate
+    loss_rms: float = 0.0
 
 
 def _gradient_l2_norm(
@@ -237,6 +238,7 @@ def train_local_client(
     optimizer_steps = 0
     overflow_retries = 0
     weighted_loss = 0.0
+    weighted_squared_loss = 0.0
     gradient_norm_sum = 0.0
     maximum_gradient_norm = 0.0
     dice_sums = {name: 0.0 for name in BRATS_REGIONS}
@@ -319,6 +321,7 @@ def train_local_client(
                 dice_sums[name] += float(values.sum().detach())
             dice_examples += batch_size
             weighted_loss += float(loss.detach()) * batch_size
+            weighted_squared_loss += float(loss.detach()) ** 2 * batch_size
             gradient_value = float(gradient_norm.detach())
             gradient_norm_sum += gradient_value
             maximum_gradient_norm = max(maximum_gradient_norm, gradient_value)
@@ -358,6 +361,7 @@ def train_local_client(
         optimizer_steps=optimizer_steps,
         amp_overflow_retries=overflow_retries,
         mean_loss=weighted_loss / examples_seen,
+        loss_rms=(weighted_squared_loss / examples_seen) ** 0.5,
         mean_gradient_norm=gradient_norm_sum / optimizer_steps,
         max_gradient_norm=maximum_gradient_norm,
         region_dice={

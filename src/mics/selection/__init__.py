@@ -8,6 +8,8 @@ from .base import (
     SelectionProbeRequest,
 )
 from .baselines import DivFLSelector, PowerOfChoiceSelector
+from .mfedmc import MFedMCSelector
+from .oort import OortSelector
 from .mics import (
     AvailabilityAwareServiceCalibration,
     MICS_SUBSET_UTILITIES,
@@ -34,6 +36,8 @@ __all__ = [
     "ClientState",
     "DivFLSelector",
     "MICSSelector",
+    "MFedMCSelector",
+    "OortSelector",
     "MICS_SERVICE_TYPES",
     "MICS_SUBSET_UTILITIES",
     "MODULAR_ADDITIVE",
