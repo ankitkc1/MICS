@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "study_id": "mics_v2_single_seed_baselines_oort_fix_v1",
+  "protocol_status": "frozen_single_seed",
+  "reference_matrix": "results/studies/mics_v2_client_queue_pilot_v1/mics_v2_pilot_matrix.json",
+  "reference_label": "mics_v2_impact",
+  "reference_source_revision": "3fb331ff1fe64cd65272e33c372e1d17f03ad9b4",
+  "reference_inputs": {
+    "scenario_config_sha256": "e3a2cd36247f89ea0805040c2bfc7f186331550dd0430ffdf3c56be95f9f8f6a",
+    "system_trace_sha256": "cbc494a76705843fd448f8726e01e2d710ee476ddc287311c09fc869026d3bc3",
+    "modality_importance_sha256": "8053bffe7d02756f8dd256386fd37f9925bc67d443fa9f815fea183515eba385"
+  },
+  "seeds": {
+    "model": 101,
+    "selection": 1009,
+    "data": 2003,
+    "trace": 3001
+  },
+  "rounds": 150,
+  "clients_per_round": 2,
+  "validation_case_count": 24,
+  "methods": [
+    "uniform_random",
+    "power_of_choice",
+    "divfl_gradient_facility",
+    "mfedmc_client_low_loss",
+    "oort_training"
+  ],
+  "power_of_choice_candidate_size": 4,
+  "probe_max_batches": null,
+  "reference_reuse": "Historical v2 and its mechanism ablations are reused. Baseline source revisions are disclosed alongside the reference revision and all recorded training/evaluation invariants are checked.",
+  "evaluation": {
+    "partition": "validation",
+    "checkpoint": "final",
+    "max_cases_per_client": null
+  },
+  "test_partitions_locked": true,
+  "completed_baseline_reuse": {
+    "manifest": "configs/mics_v2_single_seed_baselines_v1.json",
+    "source_revision": "07d8d867dc85572f462262c7b0cb961a24ee5d61",
+    "methods": [
+      "uniform_random",
+      "power_of_choice",
+      "divfl_gradient_facility",
+      "mfedmc_client_low_loss"
+    ]
+  },
+  "repair_description": "Restart Oort with a positive exploitation-pool quota cap. Reuse completed non-Oort baselines only after shared execution-source and immutable artifact checks; retain all actual revisions."
+}

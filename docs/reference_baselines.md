@@ -108,3 +108,10 @@ execution history in addition to the declared seed.
 
 The complete single-seed workflow, including historical v2 provenance and
 full validation, is described in `docs/single_seed_baselines.md`.
+
+The Oort exploitation sampler also caps its quota at the number of positive
+cutoff-qualified candidates. Failure-derived zero utilities can otherwise
+leave an undersized pool after normalization. The existing exploration and
+eligible-client fallback fill the remaining budget. The isolated repair
+study and completed-baseline reuse checks are described in
+`docs/oort_recovery.md`.

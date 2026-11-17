@@ -1,11 +1,14 @@
 """Regression tests for low-loss probes and checkpointed Oort feedback."""
 
 import copy
+from types import SimpleNamespace
 import unittest
 
 import numpy as np
 
 from mics.selection import ClientState, MFedMCSelector, OortSelector, SelectionContext
+from mics.selection.oort import OORT_PARAMETERS
+from mics.selection.vendor.oort_training import _training_selector
 
 
 def _context(round_index, available=None, losses=None):
@@ -125,6 +128,69 @@ class ExtendedSelectorTests(unittest.TestCase):
         plan = selector.plan_round(_context(0))
         self._observe(selector, plan)
         np.testing.assert_array_equal(np.random.random(5), expected)
+
+    def test_oort_fills_budget_after_cutoff_leaves_one_positive_candidate(self):
+        backend = _training_selector(
+            SimpleNamespace(**OORT_PARAMETERS), sample_seed=1009
+        )
+        for client, reward in enumerate((0.0, 0.0, 20.0, 0.0)):
+            backend.register_client(client, {"reward": 10.0, "duration": 1.0})
+            backend.update_client_util(
+                client,
+                {
+                    "reward": reward,
+                    "duration": 1.0,
+                    "time_stamp": 57,
+                    "status": reward > 0,
+                },
+            )
+        backend.training_round = 57
+        backend.exploration = backend.exploration_min = 0.0
+        selected = backend.select_participant(2, feasible_clients={0, 1, 2, 3})
+        self.assertEqual(len(set(selected)), 2)
+        self.assertIn(2, selected)
+        self.assertEqual(selected[0], 2)
+
+    def test_oort_mixed_failures_varying_availability_remain_checkpointable(self):
+        selector = OortSelector(seed=1009)
+        rng = np.random.RandomState(3001)
+        for round_index in range(150):
+            available = {f"C{i}" for i in range(8) if rng.random_sample() < 0.8}
+            available.update({"C0", "C1"})
+            context = SelectionContext(
+                round_index,
+                2,
+                tuple(
+                    ClientState(f"C{i}", {"m"}, 28, available=f"C{i}" in available)
+                    for i in range(8)
+                ),
+            )
+            plan = selector.plan_round(context)
+            self.assertEqual(len(set(plan.selected_client_ids)), 2)
+            self.assertTrue(set(plan.selected_client_ids).issubset(available))
+            successes = [
+                client
+                for client in plan.selected_client_ids
+                if rng.random_sample() < 0.6
+            ]
+            selector.record_training_feedback(
+                round_index,
+                {
+                    client: {
+                        "loss_rms": float(rng.uniform(0.1, 3)),
+                        "elapsed_seconds": float(rng.uniform(2, 8)),
+                    }
+                    for client in successes
+                },
+            )
+            selector.observe_round(
+                round_index,
+                selected_client_ids=plan.selected_client_ids,
+                successful_client_ids=successes,
+            )
+            restored = OortSelector(seed=1009)
+            restored.load_state_dict(selector.state_dict())
+            selector = restored
 
 
 if __name__ == "__main__":

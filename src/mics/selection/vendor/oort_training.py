@@ -5,7 +5,8 @@ Source https://github.com/SymbioticLab/Oort/blob/05a3aa1677a10f8e621055b1626ef82
 Apache-2.0, see OORT_LICENSE in this directory.
 
 Changes isolate NumPy RNG state, order exploration candidates, and handle
-empty exploitation, cutoff bounds, zero utilities and small-pool blacklist bounds.
+empty exploitation, cutoff bounds, nonpositive scores, undersized candidate
+pools, zero utilities and small-pool blacklist bounds.
 The testing selector and its optimization dependencies are omitted.
 """
 
@@ -292,7 +293,12 @@ class _training_selector(object):
                 break
             pickedClients.append(clientId)
 
+        # Failed clients can have zero utility and negative normalized scores.
+        # The cutoff may then leave fewer candidates than the desired quota.
+        # Sample only positive weights, and let exploration/fallback fill the gap.
+        pickedClients = [client for client in pickedClients if scores[client] > 0.0]
         augment_factor = len(pickedClients)
+        exploitLen = min(exploitLen, len(pickedClients))
 
         totalSc = float(sum(scores[key] for key in pickedClients))
         if exploitLen and totalSc > 0.0:

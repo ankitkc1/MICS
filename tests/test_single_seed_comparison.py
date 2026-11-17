@@ -2,9 +2,12 @@
 
 import copy
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from test_method_matrix_comparison import _write_method
@@ -18,9 +21,14 @@ from run_single_seed_comparison import (
     _evaluation_case_key,
     _evaluation_summary,
     _load_method,
+    _method_location,
     _nested,
     _selection_summary,
+    _reuse_binding,
+    _verify_reuse_source,
     training_command,
+    sha256_file,
+    configuration_fingerprint,
     validate_candidate,
     validate_reference,
 )
@@ -193,6 +201,127 @@ class SingleSeedComparisonTests(unittest.TestCase):
         _compare(self.manifest, self.reference, self.root, self.binding)
         with self.assertRaises(ValueError):
             _bind_study(self.root, {**self.binding, "manifest_sha256": "changed"})
+
+    def _repair_fixture(self):
+        original = {**self.manifest, "study_id": "original-study"}
+        original_path = self.root / "original-manifest.json"
+        original_path.write_text(json.dumps(original))
+        reference_path = self.root / "reference.json"
+        reference_path.write_text(json.dumps(self.reference))
+        old_root = self.root / "results" / "studies" / original["study_id"]
+        old_root.mkdir(parents=True)
+        shutil.copytree(self.candidate.run_dir, old_root / "uniform_random")
+        evaluation_path = (
+            old_root
+            / "uniform_random"
+            / "evaluations"
+            / "validation_after_round_0001.json"
+        )
+        evaluation = json.loads(evaluation_path.read_text())
+        evaluation["checkpoint"] = {
+            "config_fingerprint": configuration_fingerprint(self.candidate.config)
+        }
+        evaluation_path.write_text(json.dumps(evaluation))
+        old_binding = {
+            **self.binding,
+            "manifest_sha256": sha256_file(original_path),
+            "reference_matrix_sha256": sha256_file(reference_path),
+        }
+        (old_root / "study_binding.json").write_text(json.dumps(old_binding))
+        repair = {
+            **self.manifest,
+            "completed_baseline_reuse": {
+                "manifest": str(original_path),
+                "source_revision": "abc123",
+                "methods": ["uniform_random"],
+            },
+        }
+        return repair, reference_path, old_root
+
+    def test_repair_freezes_reused_artifacts_and_retains_their_source(self):
+        repair, reference_path, old_root = self._repair_fixture()
+        with patch(
+            "run_single_seed_comparison._verify_reuse_source",
+            return_value=["src/mics/selection/vendor/oort_training.py"],
+        ) as verify:
+            reuse = _reuse_binding(repair, self.reference, reference_path, self.root)
+            verify.assert_called_once_with(self.root, "abc123")
+            binding = {
+                **self.binding,
+                "baseline_source_revision": "fixed-source",
+                "completed_baseline_reuse": reuse,
+            }
+            new_root = self.root / "repaired-study"
+            _compare(repair, self.reference, new_root, binding)
+            result = json.loads(
+                (new_root / "single_seed_method_matrix.json").read_text()
+            )
+            self.assertEqual(
+                result["methods"]["uniform_random"]["source_revision"], "abc123"
+            )
+            self.assertEqual(
+                Path(result["methods"]["uniform_random"]["run_dir"]),
+                old_root / "uniform_random",
+            )
+            self.assertEqual(
+                _method_location("oort_training", new_root, binding),
+                (new_root / "oort_training", "fixed-source"),
+            )
+            metrics = old_root / "uniform_random" / "round_metrics.jsonl"
+            record = json.loads(metrics.read_text())
+            record["training_seconds"] += 0.1
+            metrics.write_text(json.dumps(record) + "\n")
+            changed = _reuse_binding(repair, self.reference, reference_path, self.root)
+            with self.assertRaises(ValueError):
+                _bind_study(new_root, {**binding, "completed_baseline_reuse": changed})
+
+    def test_repair_rejects_original_binding_and_protocol_drift(self):
+        repair, reference_path, old_root = self._repair_fixture()
+        with patch("run_single_seed_comparison._verify_reuse_source", return_value=[]):
+            changed = {**repair, "power_of_choice_candidate_size": 999}
+            with self.assertRaises(ValueError):
+                _reuse_binding(changed, self.reference, reference_path, self.root)
+            evaluation_path = (
+                old_root
+                / "uniform_random"
+                / "evaluations"
+                / "validation_after_round_0001.json"
+            )
+            evaluation = json.loads(evaluation_path.read_text())
+            original_evaluation = copy.deepcopy(evaluation)
+            evaluation["checkpoint"]["config_fingerprint"] = "wrong-fingerprint"
+            evaluation_path.write_text(json.dumps(evaluation))
+            with self.assertRaises(ValueError):
+                _reuse_binding(repair, self.reference, reference_path, self.root)
+            evaluation_path.write_text(json.dumps(original_evaluation))
+            binding_path = old_root / "study_binding.json"
+            original_binding = json.loads(binding_path.read_text())
+            original_binding["baseline_source_revision"] = "different-source"
+            binding_path.write_text(json.dumps(original_binding))
+            with self.assertRaises(ValueError):
+                _reuse_binding(repair, self.reference, reference_path, self.root)
+
+    def test_repair_rejects_shared_training_source_changes(self):
+        success = subprocess.CompletedProcess([], 0, stdout="")
+        allowed = subprocess.CompletedProcess(
+            [], 0, stdout="src/mics/selection/vendor/oort_training.py\n"
+        )
+        forbidden = subprocess.CompletedProcess(
+            [], 0, stdout="src/mics/training/local.py\n"
+        )
+        with patch(
+            "run_single_seed_comparison.subprocess.run", side_effect=[success, allowed]
+        ):
+            self.assertEqual(
+                _verify_reuse_source(self.root, "abc123"),
+                ["src/mics/selection/vendor/oort_training.py"],
+            )
+        with patch(
+            "run_single_seed_comparison.subprocess.run",
+            side_effect=[success, forbidden],
+        ):
+            with self.assertRaises(ValueError):
+                _verify_reuse_source(self.root, "abc123")
 
 
 if __name__ == "__main__":

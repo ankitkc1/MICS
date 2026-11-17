@@ -47,6 +47,13 @@ RUNNER_METHODS = {
     "oort_training": "oort",
 }
 
+OORT_REPAIR_SOURCE_PATHS = frozenset(
+    {
+        "src/mics/selection/vendor/oort_training.py",
+        "scripts/run_single_seed_comparison.py",
+    }
+)
+
 
 @contextmanager
 def _method_lock(path: Path):
@@ -78,6 +85,22 @@ def validate_reference(manifest: dict[str, Any], reference: dict[str, Any]) -> N
         raise ValueError("The manifest needs unique baseline methods.")
     if set(methods).difference(RUNNER_METHODS):
         raise ValueError("The manifest contains an unsupported baseline method.")
+    reuse = manifest.get("completed_baseline_reuse")
+    if reuse is not None:
+        reused = reuse.get("methods", [])
+        if (
+            not reused
+            or len(reused) != len(set(reused))
+            or not set(reused).issubset(methods)
+            or "oort_training" in reused
+        ):
+            raise ValueError(
+                "Oort repair may reuse only unique completed non-Oort baselines."
+            )
+        if not reuse.get("source_revision") or not reuse.get("manifest"):
+            raise ValueError(
+                "Completed baseline reuse requires its source and manifest."
+            )
     if reference.get("purpose") != "matched_completed_method_matrix_comparison":
         raise ValueError("The historical reference must be a completed method matrix.")
     if reference.get("interpretation_allowed") is not True:
@@ -244,6 +267,150 @@ def validate_candidate(reference: dict[str, Any], candidate) -> None:
         )
 
 
+def _verify_reuse_source(root: Path, source_revision: str) -> list[str]:
+    """Allow only this repair's sampler and orchestration changes in execution code."""
+
+    subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source_revision, "HEAD"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "--no-renames",
+            source_revision,
+            "HEAD",
+            "--",
+            "src",
+            "scripts",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    changed = sorted(result.stdout.splitlines())
+    if set(changed).difference(OORT_REPAIR_SOURCE_PATHS):
+        raise ValueError(
+            "Completed baseline reuse would cross changed shared training code."
+        )
+    return changed
+
+
+def _evaluation_path(run_dir: Path, rounds: int) -> Path:
+    return run_dir / "evaluations" / f"validation_after_round_{rounds:04d}.json"
+
+
+def _reuse_binding(manifest, reference, reference_path: Path, root: Path):
+    reuse = manifest["completed_baseline_reuse"]
+    original_manifest_path = root / reuse["manifest"]
+    original = _json_object(original_manifest_path)
+    if original.get("completed_baseline_reuse") is not None:
+        raise ValueError("Nested completed-baseline reuse is not supported.")
+    validate_reference(original, reference)
+    for key in (
+        "seeds",
+        "rounds",
+        "clients_per_round",
+        "methods",
+        "validation_case_count",
+        "reference_label",
+        "reference_source_revision",
+        "reference_inputs",
+        "power_of_choice_candidate_size",
+        "probe_max_batches",
+        "evaluation",
+        "test_partitions_locked",
+    ):
+        if original.get(key) != manifest.get(key):
+            raise ValueError(f"The repair differs from the completed study at {key}.")
+    if original["study_id"] == manifest["study_id"]:
+        raise ValueError("Oort repair requires a new study identifier.")
+    old_root = root / "results" / "studies" / original["study_id"]
+    old_binding_path = old_root / "study_binding.json"
+    old_binding = _json_object(old_binding_path)
+    expected = {
+        "manifest_sha256": sha256_file(original_manifest_path),
+        "reference_matrix_sha256": sha256_file(reference_path),
+        "reference_source_revision": manifest["reference_source_revision"],
+        "baseline_source_revision": reuse["source_revision"],
+    }
+    if old_binding != expected:
+        raise ValueError(
+            "The completed study binding differs from the repair declaration."
+        )
+    changed = _verify_reuse_source(root, reuse["source_revision"])
+    methods = {}
+    for name in reuse["methods"]:
+        run_dir = old_root / name
+        evaluation = _evaluation_path(run_dir, manifest["rounds"])
+        candidate = _load_method((name, str(run_dir), str(evaluation)))
+        validate_candidate(reference, candidate)
+        if (
+            candidate.config["method"] != name
+            or candidate.metadata["source_revision"] != reuse["source_revision"]
+        ):
+            raise ValueError(
+                "A reused baseline differs from its declared method or source."
+            )
+        expected_selection = None
+        if name != "uniform_random":
+            runner = importlib.import_module("run_reference_baseline")
+            expected_selection = runner._method_record(
+                argparse.Namespace(
+                    method=RUNNER_METHODS[name],
+                    candidate_size=manifest["power_of_choice_candidate_size"],
+                    probe_max_batches=manifest["probe_max_batches"],
+                )
+            )
+        if candidate.config.get("selection") != expected_selection:
+            raise ValueError(
+                "A reused baseline selection policy differs from the frozen manifest."
+            )
+        evaluated_fingerprint = candidate.evaluation_payload.get("checkpoint", {}).get(
+            "config_fingerprint"
+        )
+        if evaluated_fingerprint != configuration_fingerprint(candidate.config):
+            raise ValueError(
+                "A reused evaluation does not match its run configuration."
+            )
+        files = [
+            run_dir / filename
+            for filename in (
+                "resolved_config.json",
+                "run_metadata.json",
+                "status.json",
+                "round_metrics.jsonl",
+            )
+        ]
+        files.append(evaluation)
+        methods[name] = {
+            "run_dir": str(run_dir),
+            "source_revision": reuse["source_revision"],
+            "artifact_sha256": {
+                str(path.relative_to(run_dir)): sha256_file(path) for path in files
+            },
+        }
+    return {
+        "study_id": original["study_id"],
+        "study_binding_sha256": sha256_file(old_binding_path),
+        "changed_execution_source_paths": changed,
+        "unchanged_shared_training_source_verified": True,
+        "methods": methods,
+    }
+
+
+def _method_location(name, output_root: Path, binding):
+    reused = binding.get("completed_baseline_reuse", {}).get("methods", {})
+    if name in reused:
+        return Path(reused[name]["run_dir"]), reused[name]["source_revision"]
+    return output_root / name, binding["baseline_source_revision"]
+
+
 def _binding(
     manifest_path: Path, reference_path: Path, reference: dict[str, Any], root: Path
 ) -> dict[str, Any]:
@@ -252,7 +419,7 @@ def _binding(
         raise ValueError(
             "Commit the comparison code before executing the frozen HPC study."
         )
-    return {
+    binding = {
         "manifest_sha256": sha256_file(manifest_path),
         "reference_matrix_sha256": sha256_file(reference_path),
         "reference_source_revision": reference["paired_invariants"]["runtime"][
@@ -260,6 +427,12 @@ def _binding(
         ],
         "baseline_source_revision": metadata["source_revision"],
     }
+    manifest = _json_object(manifest_path)
+    if manifest.get("completed_baseline_reuse") is not None:
+        binding["completed_baseline_reuse"] = _reuse_binding(
+            manifest, reference, reference_path, root
+        )
+    return binding
 
 
 def _bind_study(output_root: Path, binding: dict[str, Any]) -> None:
@@ -314,7 +487,21 @@ def _run_method(
         raise FileNotFoundError(arguments.dataset_root)
     with _method_lock(output_root / f".{method}.lock"):
         _bind_study(output_root, binding)
-        run_dir = output_root / method
+        run_dir, expected_source = _method_location(method, output_root, binding)
+        if run_dir != output_root / method:
+            candidate = _load_method(
+                (
+                    method,
+                    str(run_dir),
+                    str(_evaluation_path(run_dir, manifest["rounds"])),
+                )
+            )
+            validate_candidate(reference, candidate)
+            if candidate.metadata["source_revision"] != expected_source:
+                raise ValueError("The reused baseline source changed.")
+            print(f"Reusing completed baseline: {run_dir}", flush=True)
+            print(f"MICS-V2 FULL SINGLE-SEED BASELINE PASSED: {method}", flush=True)
+            return
         command = training_command(
             manifest,
             reference,
@@ -405,15 +592,11 @@ def _compare(manifest, reference, output_root, binding) -> None:
             methods[name]["selection_and_training"]
         )
     for name in manifest["methods"]:
-        run_dir = output_root / name
-        path = (
-            run_dir
-            / "evaluations"
-            / f"validation_after_round_{manifest['rounds']:04d}.json"
-        )
+        run_dir, expected_source = _method_location(name, output_root, binding)
+        path = _evaluation_path(run_dir, manifest["rounds"])
         candidate = _load_method((name, str(run_dir), str(path)))
         validate_candidate(reference, candidate)
-        if candidate.metadata["source_revision"] != binding["baseline_source_revision"]:
+        if candidate.metadata["source_revision"] != expected_source:
             raise ValueError("Baseline source revisions differ within the study.")
         if candidate.config["method"] != name:
             raise ValueError("A baseline method differs from its manifest identity.")
@@ -460,6 +643,17 @@ def _compare(manifest, reference, output_root, binding) -> None:
             if name != label
         },
     }
+    if "completed_baseline_reuse" in binding:
+        revisions = {
+            name: methods[name]["source_revision"] for name in manifest["methods"]
+        }
+        report["baseline_source_revisions"] = revisions
+        report["baseline_source_revisions_match"] = len(set(revisions.values())) == 1
+        report["provenance_note"] += (
+            " Completed non-Oort baselines retain their original artifacts and revision."
+            " Shared training source was verified unchanged; Oort was restarted under"
+            " the corrected sampler in a new study."
+        )
     with _method_lock(output_root / ".comparison.lock"):
         path = output_root / "single_seed_method_matrix.json"
         if path.exists() and _json_object(path) != report:
