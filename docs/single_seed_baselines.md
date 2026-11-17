@@ -27,10 +27,12 @@ The existing same-revision comparison script retains its original checks.
 
 The historical model was trained using Python 3.10.22, PyTorch 2.5.1, CUDA
 12.1 and an NVIDIA RTX A4000. The full baseline job checks those recorded
-runtime fields before training. Use the university's resource syntax to
-request the appropriate GPU, and adapt the partition/account directives to
-the site. The aggregation job uses a CPU task and no GPU resource, with the
-example `gpu` partition retained for consistency with the other templates.
+runtime fields before training. The university reports the matching Slurm
+GPU type as `rtxa4000`, so the baseline template requests
+`--gres=gpu:rtxa4000:1`. The separate `rtxa4000ada` type and the L40S do not
+match this reference. Adapt partition/account directives for another site.
+The aggregation job uses a CPU task and no GPU resource, with the example
+`gpu` partition retained for consistency with the other templates.
 
 Install the updated package in the existing environment, validate it and
 commit the reviewed code before submitting the frozen study. The runner
